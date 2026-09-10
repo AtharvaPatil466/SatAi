@@ -33,8 +33,8 @@ export function Sidebar() {
       </nav>
       <div className="absolute bottom-0 hidden w-[248px] border-t border-border p-5 lg:block">
         <p className="eyebrow">Runtime posture</p>
-        <div className="mt-3 flex items-center gap-2 text-xs text-slate-300"><span className="size-2 rounded-full bg-success shadow-[0_0_10px_#55d68a]" /> Offline ready</div>
-        <p className="mt-2 text-[11px] leading-relaxed text-slate-500">No network required for verified golden results.</p>
+        <div className="mt-3 text-xs text-slate-300">Offline-first design</div>
+        <p className="mt-2 text-[11px] leading-relaxed text-slate-500">Exact golden results require the local API and committed artifact. Check System for API status.</p>
       </div>
     </aside>
   );

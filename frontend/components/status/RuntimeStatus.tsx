@@ -5,7 +5,7 @@ import { getHealth } from "@/lib/api";
 
 export function RuntimeStatus() {
   const [state, setState] = useState<"checking" | "ready" | "offline">("checking");
-  useEffect(() => { getHealth().then(() => setState("ready")).catch(() => setState("offline")); }, []);
+  useEffect(() => { getHealth().then(data => setState(data.status === "ready" ? "ready" : "offline")).catch(() => setState("offline")); }, []);
   const ready = state === "ready";
   return (
     <div className="panel flex items-center justify-between p-5">

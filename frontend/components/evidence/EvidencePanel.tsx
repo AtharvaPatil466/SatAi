@@ -1,5 +1,5 @@
 import type { TraceRecord } from "@/lib/types";
-import { formatTimestamp, shortHash } from "@/lib/utils";
+import { formatTimestamp } from "@/lib/utils";
 import { IntegrityBadge } from "./IntegrityBadge";
 import { TraceDrawer } from "./TraceDrawer";
 
@@ -9,9 +9,15 @@ export function EvidencePanel({ trace }: { trace: TraceRecord }) {
       <div className="mb-4 flex items-center justify-between"><p className="eyebrow">Execution evidence</p><IntegrityBadge /></div>
       <div className="grid gap-3 sm:grid-cols-2">
         <Evidence label="Identity" value={trace.params.scene_id ?? "Not recorded"} mono />
-        <Evidence label="Execution" value={`${trace.model_name} · ${trace.params.execution_mode}`} />
+        <Evidence label="Model" value={trace.model_name} />
+        <Evidence label="Model version" value={trace.model_version} />
+        <Evidence label="Execution mode" value={trace.params.execution_mode} />
+        <Evidence label="Capability" value={trace.params.capability ?? "Not recorded"} />
+        <Evidence label="Planner version" value={trace.params.planner_version ?? "Not recorded"} />
+        <Evidence label="Planner rule" value={trace.params.planner_rule ?? "Not recorded"} />
         <Evidence label="Question" value={trace.input_summary.question} />
-        <Evidence label="Integrity" value={shortHash(trace.record_hash)} mono detail={formatTimestamp(trace.timestamp_iso)} />
+        <Evidence label="Record hash" value={trace.record_hash} mono detail={formatTimestamp(trace.timestamp_iso)} />
+        <Evidence label="Previous hash" value={trace.prev_hash || "Genesis (empty previous hash)"} mono />
       </div>
       <div className="mt-4"><TraceDrawer trace={trace} /></div>
     </section>

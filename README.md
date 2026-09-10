@@ -1,5 +1,9 @@
 # sih26167
 
+Phase 0 Next.js/API setup, dependency roles, demo and verification commands:
+[local runbook](backend/README.md). Integration evidence and remaining freeze
+conditions: [verification report](docs/PHASE0_VERIFICATION.md).
+
 Contract-first scaffold for a multi-agent geospatial visual-question-answering system on Python 3.11 (recorded in `.python-version`). Install with `pip3 install -r requirements.txt`; if `rasterio` fails to install on macOS, omit it for the MVP demo because none of the scaffolded paths require it.
 
 ## Folders and invariants
