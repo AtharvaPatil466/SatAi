@@ -7,8 +7,9 @@ The API contract is frozen; this frontend uses the existing API and exact golden
 
 The repository declares **Python 3.11** in `.python-version`. The integration
 and fresh-environment checks on 2026-09-10 used **Python 3.14.3**, Node **24.18.0**
-and npm **11.16.0**. This does not change the declared Python version or establish
-a new cross-version support guarantee.
+and npm **11.16.0**; the frozen-commit clean-checkout reproduction on 2026-09-11
+used **Python 3.14.3**, Node **v25.9.0** and npm **11.12.1**. This does not change
+the declared Python version or establish a new cross-version support guarantee.
 
 Choose the Python interpreter installed on your machine; `python3` was 3.14.3
 on the verification machine. For the declared version, use `python3.11` instead.
@@ -26,12 +27,20 @@ listed in root `requirements.txt`, not `backend/requirements.txt`; the explicit
 `pillow` above resolves the minimal-install gap without installing the scientific stack.
 
 For **full project tests, Streamlit, scientific processing and model dependencies**,
-also install the root requirements in the same environment:
+install the root requirements into the **same** virtual environment; the full
+test suite requires both requirement files:
 
 ```sh
+backend/.venv/bin/pip install -r backend/requirements.txt
 backend/.venv/bin/pip install -r requirements.txt
-backend/.venv/bin/python -m pytest -q
+backend/.venv/bin/python -m pytest -q  # run from the repository root so the
+                                       # trace-isolation conftest.py applies
 ```
+
+Clean-checkout reproduction of frozen commit
+`e1c97ebe6937ecac68ce55602c795e144c04e77c` on 2026-09-11 with this combined
+install produced **254 passed, 2 warnings** and a successful `npm run build`
+with no code changes (observed on Python 3.14.3).
 
 Root requirements alone do not install the API/test dependencies. Backend
 requirements plus Pillow do not install the full scientific/test stack.
@@ -178,6 +187,9 @@ model, georeferencing, pair-upload workflow or fallback broadening is included.
 Full GPU inference was not exercised on this Mac. Scientific SAR summaries are
 human interpretation, not automatic classification or optical–SAR fusion.
 
-See [verification evidence](../docs/PHASE0_VERIFICATION.md) for the current runtime
-trace discrepancy and freeze status. The integration diff is intentionally
-uncommitted; final commit-based clean checkout reproduction remains pending.
+See [verification evidence](../docs/PHASE0_VERIFICATION.md) for freeze status and
+evidence. Phase 0 is frozen at commit `e1c97ebe6937ecac68ce55602c795e144c04e77c`
+(`feat/phase0-frontend-integration`, parent `93b21b0`, `main` unchanged); a
+clean-checkout reproduction of that commit passed end-to-end on 2026-09-11,
+exercising the truthful no-CUDA path and the exact cached golden fallback.
+Live CUDA inference was not reproduced and remains out of scope for Phase 0.

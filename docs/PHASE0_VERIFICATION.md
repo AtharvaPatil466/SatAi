@@ -2,14 +2,16 @@
 
 ## Result
 
-**PARTIAL: frontend integration implemented and reproduced; original runtime audit
-recovery complete (see "Runtime trace recovery" below); committed freeze still
-pending final Git authorization.**
+**FROZEN: frontend integration implemented and reproduced; original runtime audit
+recovery complete (see "Runtime trace recovery" below); freeze commit
+`e1c97ebe6937ecac68ce55602c795e144c04e77c` created and clean-checkout-reproduced
+(see "Frozen commit and clean-checkout reproduction" at the end).**
 
-Branch: `feat/phase0-frontend-integration`.
-HEAD and main remain `93b21b0ed5ee02b9ff8bda5a568d2fb15cbde6fe`.
-Changes are intentionally uncommitted. No backend runtime/API, model, dependency
-manifest, Python declaration, or fallback-rule changes were made.
+Branch: `feat/phase0-frontend-integration`. The integration work above was made
+against `93b21b0ed5ee02b9ff8bda5a568d2fb15cbde6fe`, which remains `main`; the
+frozen commit `e1c97eb` sits directly on top of it. No backend runtime/API,
+model, dependency manifest, Python declaration, or fallback-rule changes were
+made at any point.
 
 Implemented real upload → plan → analyze, image retrieval, editable questions,
 structured plans, safe errors, cached/live distinction, provenance, history,
@@ -224,5 +226,42 @@ below were executed and observed first-hand afterward.
 - No git commit, push, merge, rebase, reset, stash, or clean was performed;
   no files other than this documentation were modified.
 
-Remaining freeze conditions: final Git action review/authorization for the
-integration branch; then Phase 0 can be frozen.
+## Frozen commit and clean-checkout reproduction — 2026-09-11
+
+Phase 0 was frozen as commit `e1c97ebe6937ecac68ce55602c795e144c04e77c`
+(`feat: integrate Next.js frontend with frozen Phase 0 API contract`, 26 files,
+977 insertions / 201 deletions) on `feat/phase0-frontend-integration`, parent
+`93b21b0ed5ee02b9ff8bda5a568d2fb15cbde6fe` = `main` (unchanged). Nothing was
+pushed or merged.
+
+A completely fresh clone checked out exactly that commit and reproduced the
+release from the committed documentation only:
+
+- Environment: Python 3.14.3, Node v25.9.0, npm 11.12.1. The declared version
+  remains 3.11 in `.python-version` (unchanged).
+- Install: the full test suite requires backend/requirements.txt **and** the
+  root requirements.txt in the same virtual environment; `backend/README.md`
+  documents both paths. The minimal API environment was separately re-validated
+  by importing `backend.main` with backend requirements + Pillow alone.
+- `backend/.venv/bin/python -m pytest -q` → **254 passed, 2 warnings**.
+- `cd frontend && npm run build` → successful production build.
+- Upload of the committed PNG returned a server-generated `scene_*` id; image
+  retrieval was byte-identical (SHA-256 match); `POST /api/plan` returned the
+  one-step `single_image_vqa` plan with `execution_plan_version: phase0-plan-v1`.
+- Non-golden analysis failed truthfully: HTTP 503 "Live model inference is
+  unavailable." with **no trace written**.
+- The exact golden query returned `cached_result`, answer `Yes`, referencing
+  `results/qwen2.5vl-3b__ladder__rescored__20260904.json`, and created the
+  clone's own independent 1-record hash chain: `POST /api/traces/verify` →
+  `{"verified":true,"message":"Chain verified (1 records)"}`.
+- A backend restart (new process) preserved the chain: count 1, verified true.
+- The original checkout, its port-8000 backend (8-record chain, verified) and
+  `main` were untouched throughout; the reproduction performed no commit, push,
+  merge, rebase, reset, stash, or clean.
+
+No live CUDA inference was exercised; the truthful no-CUDA path and the exact
+cached golden fallback were verified instead. An earlier report of a runbook
+installation ambiguity was a reviewer mis-read: the committed runbook already
+documented the two-environment split correctly; only the stale
+"uncommitted / freeze pending" status lines were corrected in this
+documentation pass.
