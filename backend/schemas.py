@@ -36,6 +36,7 @@ class ModelInfo(BaseModel):
 
 class AnalyzeResponse(BaseModel):
     answer: str
+    evidence: list[dict[str, Any]] | None = None
     execution_mode: Literal["live", "cached_result"]
     results_artifact: str | None = None
     model: ModelInfo

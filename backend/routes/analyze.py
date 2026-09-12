@@ -64,7 +64,9 @@ def plan(request: AnalyzeRequest) -> PlanResponse:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/analyze", response_model=AnalyzeResponse)
+@router.post(
+    "/analyze", response_model=AnalyzeResponse, response_model_exclude_unset=True
+)
 def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     try:
         return AnalyzeResponse.model_validate(

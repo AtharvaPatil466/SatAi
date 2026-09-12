@@ -259,14 +259,21 @@ def _live_response(result: Any) -> dict[str, Any]:
     model_version = trace.get("model_version")
     if not isinstance(model_name, str) or not isinstance(model_version, str):
         raise InvalidModelOutput
-    return {
+    response = {
         "answer": answer.strip(),
         "execution_mode": "live",
         "results_artifact": None,
         "model": {"name": model_name, "version": model_version},
         "trace": dict(trace),
-        "notice": "Live Qwen2.5-VL-3B inference completed.",
+        "notice": (
+            "Live Qwen2.5-VL-3B inference completed."
+            if model_name == MODEL_NAME
+            else f"Live {model_name} inference completed."
+        ),
     }
+    if "evidence" in result:
+        response["evidence"] = result["evidence"]
+    return response
 
 
 def analyze_scene(
@@ -295,11 +302,11 @@ def analyze_scene(
         raise CapabilityUnavailable(
             plan.unavailable_reason or "The selected capability cannot be executed."
         )
-    if not is_golden_eligible_plan(execution):
-        raise CapabilityUnavailable(
-            "The planned execution requires capabilities that are not currently available."
-        )
-    cached = find_cached_result(scene_id, question, plan.selected_capability)
+    cached = (
+        find_cached_result(scene_id, question, plan.selected_capability)
+        if is_golden_eligible_plan(execution)
+        else None
+    )
     image_path = local_scene_image(scene_id)
     if image_path is None:
         if cached is None:
@@ -337,7 +344,16 @@ def analyze_scene(
             )
         raise ModelUnavailable from exc
     except Exception as exc:
-        unavailable = "CUDA GPU" in str(exc) or "requires transformers" in str(exc)
+        unavailable = any(
+            marker in str(exc)
+            for marker in (
+                "CUDA GPU",
+                "requires transformers",
+                "requires groundingdino",
+                "configuration is unavailable",
+                "checkpoint could not be loaded",
+            )
+        )
         if cached is None:
             error = ModelUnavailable if unavailable else ModelExecutionError
             raise error from exc
