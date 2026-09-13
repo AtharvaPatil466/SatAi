@@ -1,4 +1,4 @@
-import type { AnalysisRequest, AnalysisResponse, CapabilityStatus, OperationState, PlanResponse, ResolutionReport, SarReport, SceneUploadResponse, TraceHistory, TraceVerification } from "./types";
+import type { AnalysisRequest, AnalysisResponse, CapabilityStatus, OperationState, PlanResponse, ResolutionReport, SarReport, SceneCatalog, SceneUploadResponse, TraceHistory, TraceVerification } from "./types";
 
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
@@ -42,10 +42,19 @@ export function uploadScene(file: File) {
   return request<SceneUploadResponse>("/api/scenes", { method: "POST", body });
 }
 export const sceneImageUrl = (scene: string) => `${API_URL}/api/scenes/${encodeURIComponent(scene)}/image`;
+export const resolutionImageUrl = (gsd: number) => `${API_URL}/api/resolution/rungs/${encodeURIComponent(gsd)}/image`;
 export const sarImageUrl = (scene: string) => `${API_URL}/api/sar/${encodeURIComponent(scene)}/image`;
 export const planAnalysis = (body: AnalysisRequest) => request<PlanResponse>("/api/plan", jsonBody(body));
 export const analyzeScene = (body: AnalysisRequest) => request<AnalysisResponse>("/api/analyze", jsonBody(body));
 export const getCapabilities = () => request<{ capabilities: CapabilityStatus[] }>("/api/capabilities");
+export const getSceneCatalog = () => request<SceneCatalog>("/api/scenes");
+export async function getSceneAsset(sceneId: string): Promise<Blob> {
+  let response: Response;
+  try { response = await fetch(sceneImageUrl(sceneId), { cache: "no-store" }); }
+  catch { throw new ApiError(0, "The curated scene asset could not be reached."); }
+  if (!response.ok) throw new ApiError(response.status, "The curated scene asset is unavailable or unverified.");
+  return response.blob();
+}
 export const getResolution = () => request<ResolutionReport>("/api/resolution");
 export const getSar = (scene = "mumbai-coastal") => request<SarReport>(`/api/sar/${encodeURIComponent(scene)}`);
 export const getTraces = () => request<TraceHistory>("/api/traces");

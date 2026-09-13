@@ -1,0 +1,135 @@
+{
+  "version": "1.0",
+  "scenes": [
+    {
+      "id": "loveda-golden-vqa",
+      "title": "LoveDA golden VQA scene",
+      "capability": "single_image_vqa",
+      "result_state": "cached_real",
+      "catalog_visible": false,
+      "replay_upload": false,
+      "available": true,
+      "asset_path": "data/ladder/0.3/loveda_Train_Rural_images_png_0_gsd0.3.png",
+      "asset_sha256": "495a8e889c686611f5324cb1c03ecf2b22cedc424c868fc13a8666e2fc5ab0e0",
+      "pixel_sha256": "d45e01abf260141843f1adb8dbaf8a0f13e9b52b797a2b6780822f7569385d26",
+      "width": 1024,
+      "height": 1024,
+      "source": {
+        "dataset": "LoveDA",
+        "dataset_split": null,
+        "source_id": "loveda_LoveDA_images_png_0_gsd0.3",
+        "sensor": null,
+        "gsd": 0.3,
+        "location": null,
+        "acquisition_date": null
+      },
+      "question": "Is there a building in this image?",
+      "evaluated_expression": "Is there a building in this image?",
+      "artifact": {
+        "path": "results/qwen2.5vl-3b__ladder__rescored__20260904.json",
+        "sha256": "2feb71dcd8f19570cefc5840c69224c426d8072cec32cd12defd6f657f7ee6a0",
+        "selector": {
+          "tile_id": "loveda_LoveDA_images_png_0_gsd0.3",
+          "question": "Is there a building in this image?"
+        },
+        "model_name": "qwen2.5vl-3b",
+        "model_version": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "run_id": null,
+        "git_sha": "c54da56",
+        "working_tree_sha256": null
+      }
+    },
+    {
+      "id": "dior-rsvg-07272",
+      "title": "DIOR-RSVG yellow ship",
+      "capability": "grounding",
+      "result_state": "cached_real",
+      "catalog_visible": true,
+      "replay_upload": true,
+      "available": false,
+      "unavailable_reason": "The exact DIOR-RSVG 07272.jpg evaluation input is not present locally; no substitute is permitted.",
+      "asset_path": "data/demo/grounding/07272.jpg",
+      "asset_sha256": null,
+      "pixel_sha256": null,
+      "width": 800,
+      "height": 800,
+      "source": {
+        "dataset": "DIOR-RSVG",
+        "dataset_split": "official test.txt split",
+        "source_id": "JPEGImages/07272.jpg",
+        "sensor": null,
+        "gsd": null,
+        "location": null,
+        "acquisition_date": null
+      },
+      "question": "Locate a yellow ship.",
+      "evaluated_expression": "A yellow ship",
+      "artifact": {
+        "path": "results/grounding-dino-swint__dior-rsvg__20260911T084941Z.json",
+        "sha256": "2e5b7b43fb0fbc50233336ca2acd7b8e9c9bf041465af722e67431e9d216c136",
+        "selector": {
+          "test_index": 12136,
+          "image_id": "07272"
+        },
+        "model_name": "grounding-dino-swint",
+        "model_version": "ShilongLiu/GroundingDINO:groundingdino_swint_ogc.pth",
+        "run_id": "grounding-dino-swint__dior-rsvg__20260911T085257Z",
+        "git_sha": "14e8c14a211eb14807678961d1222f396c7674f1",
+        "working_tree_sha256": "1f3c3e15e824f0a318b7e77b0fe98f79cbae96cb219212b115345d714bdc8d5d"
+      }
+    }
+  ],
+  "resolution_ladder": {
+    "scene_id": "loveda-resolution-0",
+    "source_dataset": "LoveDA",
+    "result_state": "cached_real",
+    "artifact_path": "results/qwen2.5vl-3b__ladder__rescored__20260904.json",
+    "artifact_sha256": "2feb71dcd8f19570cefc5840c69224c426d8072cec32cd12defd6f657f7ee6a0",
+    "rungs": [
+      {
+        "gsd": 0.3,
+        "available": true,
+        "asset_path": "data/ladder/0.3/loveda_Train_Rural_images_png_0_gsd0.3.png",
+        "asset_sha256": "495a8e889c686611f5324cb1c03ecf2b22cedc424c868fc13a8666e2fc5ab0e0",
+        "width": 1024,
+        "height": 1024
+      },
+      {
+        "gsd": 1.0,
+        "available": false,
+        "unavailable_reason": "The exact evaluated 1.0 m rung image is not present locally.",
+        "asset_path": "data/demo/resolution/loveda_LoveDA_images_png_0_gsd1.0.png",
+        "asset_sha256": null,
+        "width": null,
+        "height": null
+      },
+      {
+        "gsd": 2.0,
+        "available": false,
+        "unavailable_reason": "The exact evaluated 2.0 m rung image is not present locally.",
+        "asset_path": "data/demo/resolution/loveda_LoveDA_images_png_0_gsd2.0.png",
+        "asset_sha256": null,
+        "width": null,
+        "height": null
+      },
+      {
+        "gsd": 5.0,
+        "available": false,
+        "unavailable_reason": "The exact evaluated 5.0 m rung image is not present locally.",
+        "asset_path": "data/demo/resolution/loveda_LoveDA_images_png_0_gsd5.0.png",
+        "asset_sha256": null,
+        "width": null,
+        "height": null
+      },
+      {
+        "gsd": 10.0,
+        "available": false,
+        "unavailable_reason": "The exact evaluated 10.0 m rung image is not present locally.",
+        "asset_path": "data/demo/resolution/loveda_LoveDA_images_png_0_gsd10.0.png",
+        "asset_sha256": null,
+        "width": null,
+        "height": null
+      }
+    ]
+  }
+}

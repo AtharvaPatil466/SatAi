@@ -19,6 +19,7 @@ export function Workspace() {
   const [question, setQuestion] = useState("");
   const [planned, setPlanned] = useState<{ request: AnalysisRequest; plan: PlanResponse } | null>(null);
   const [result, setResult] = useState<AnalysisResponse | null>(null);
+  const [selectedEvidence, setSelectedEvidence] = useState<number | null>(null);
   const [history, setHistory] = useState<TraceHistory | null>(null);
   const [verification, setVerification] = useState<TraceVerification | null>(null);
   const [state, setState] = useState<OperationState>("IDLE");
@@ -27,9 +28,10 @@ export function Workspace() {
   const [verifying, setVerifying] = useState(false);
   const pending = useRef(false);
   const busy = state === "LOADING" || verifying;
+  const alert = state === "INVALID INPUT" || state === "UNAVAILABLE" || state === "EXECUTION ERROR";
 
   function clear() {
-    setPlanned(null); setResult(null); setHistory(null); setVerification(null); setTraceError(null); setState("IDLE"); setMessage("Plan the current scene and question.");
+    setPlanned(null); setResult(null); setSelectedEvidence(null); setHistory(null); setVerification(null); setTraceError(null); setState("IDLE"); setMessage("Plan the current scene and question.");
   }
   function fail(reason: unknown) { setState(errorState(reason)); setMessage(errorMessage(reason)); }
 
@@ -62,7 +64,7 @@ export function Workspace() {
 
   async function analyze() {
     if (pending.current || !planned?.plan.executable || planned.plan.unavailable_capabilities.length) return;
-    pending.current = true; setResult(null); setHistory(null); setVerification(null); setTraceError(null); setState("LOADING"); setMessage("Analyzing…");
+    pending.current = true; setResult(null); setSelectedEvidence(null); setHistory(null); setVerification(null); setTraceError(null); setState("LOADING"); setMessage("Analyzing…");
     try {
       const data = await analyzeScene(planned.request);
       setResult(data);
@@ -80,23 +82,37 @@ export function Workspace() {
     finally { pending.current = false; setVerifying(false); }
   }
 
-  return <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,1fr)]">
+  return <div className="grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(340px,0.85fr)]">
+    {/* Imagery is the hero: pixels first, controls beneath, analysis alongside. */}
     <div className="min-w-0 space-y-4">
-      <div className="panel space-y-4 p-5"><UploadScene disabled={busy} onSelect={selectFile} />
-        <button disabled={busy} onClick={() => { if (pending.current) return; clear(); setSceneId(GOLDEN_SCENE); setUpload(null); setQuestion(GOLDEN_QUESTION); }} className="rounded border border-border px-4 py-2 text-sm text-accent disabled:opacity-50">Use exact golden demo</button>
-        {sceneId === GOLDEN_SCENE && <p className="text-xs text-warning">{question.trim() === GOLDEN_QUESTION ? "Exact committed demo pair selected. Cached fallback is eligible if live execution is unavailable." : "Question changed. The exact golden cached result is not eligible."}</p>}
+      <ImageryViewer key={sceneId ?? "empty"} sceneId={sceneId} evidence={result?.evidence} selected={selectedEvidence} onSelect={setSelectedEvidence} />
+      <SceneMetadata sceneId={sceneId} upload={upload} />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <QueryPanel question={question} onQuestion={value => { if (pending.current) return; clear(); setQuestion(value); }} plan={planned?.plan ?? null} busy={busy} hasScene={!!sceneId} onPlan={plan} onAnalyze={analyze} />
+        <div className="panel space-y-3 p-5">
+          <p className="eyebrow">Scene source</p>
+          <UploadScene disabled={busy} onSelect={selectFile} />
+          <button disabled={busy} onClick={() => { if (pending.current) return; clear(); setSceneId(GOLDEN_SCENE); setUpload(null); setQuestion(GOLDEN_QUESTION); }} className="w-full rounded border border-border px-4 py-2 text-sm text-accent disabled:opacity-50">Use exact golden demo</button>
+          {sceneId === GOLDEN_SCENE && <p className="text-xs text-warning">{question.trim() === GOLDEN_QUESTION ? "Exact committed demo pair selected. Cached fallback is eligible if live execution is unavailable." : "Question changed. The exact golden cached result is not eligible."}</p>}
+          <div role={alert ? "alert" : "status"} className="rounded-lg border border-border bg-raised/35 p-3 text-xs">
+            <strong className="font-mono tracking-[0.08em] text-slate-300">{state}</strong>
+            <p className="mt-1.5 leading-relaxed text-slate-400">{message}</p>
+          </div>
+        </div>
       </div>
-      <ImageryViewer key={sceneId ?? "empty"} sceneId={sceneId} /><SceneMetadata sceneId={sceneId} upload={upload} />
     </div>
     <div className="min-w-0 space-y-4">
-      <QueryPanel question={question} onQuestion={value => { if (pending.current) return; clear(); setQuestion(value); }} plan={planned?.plan ?? null} busy={busy} hasScene={!!sceneId} onPlan={plan} onAnalyze={analyze} />
-      <div role={state === "INVALID INPUT" || state === "UNAVAILABLE" || state === "EXECUTION ERROR" ? "alert" : "status"} className="panel p-4 text-sm"><strong>{state}</strong><p className="mt-2">{message}</p></div>
-      {result && <><AnalysisResult result={result} /><EvidencePanel trace={result.trace} />
+      {!result && <div className="panel p-5 text-xs leading-relaxed text-slate-500">
+        <p className="eyebrow mb-2">Analysis</p>
+        No analysis has run for this scene. The answer, its visual evidence, and the execution record appear here.
+      </div>}
+      {result && <><AnalysisResult result={result} />
+        <EvidencePanel trace={result.trace} evidence={result.evidence ?? null} selected={selectedEvidence} onSelect={setSelectedEvidence} />
         <section className="panel space-y-3 p-4 text-sm">
-          <p>{history ? `${history.count} persisted trace records.` : "History could not be refreshed."} <a href="/executions" className="text-accent underline">Inspect history</a></p>
-          <button disabled={busy} onClick={verify} className="rounded border border-accent p-2 text-accent disabled:opacity-50">{verifying ? "Verifying…" : "Verify trace chain"}</button>
-          {verification && <p role="status" className={verification.verified ? "text-success" : "text-error"}>{verification.verified ? "VERIFIED" : "FAILED"}: {verification.message}</p>}
-          {traceError && <p role="alert" className="text-warning">Trace unavailable: {traceError}</p>}
+          <p className="text-xs text-slate-400">{history ? `${history.count} persisted trace records.` : "History could not be refreshed."} <a href="/executions" className="text-accent underline">Inspect history</a></p>
+          <button disabled={busy} onClick={verify} className="w-full rounded border border-accent p-2 text-xs text-accent disabled:opacity-50">{verifying ? "Verifying…" : "Verify trace chain"}</button>
+          {verification && <p role="status" className={`text-xs ${verification.verified ? "text-success" : "text-error"}`}>{verification.verified ? "VERIFIED" : "FAILED"}: {verification.message}</p>}
+          {traceError && <p role="alert" className="text-xs text-warning">Trace unavailable: {traceError}</p>}
         </section>
       </>}
     </div>

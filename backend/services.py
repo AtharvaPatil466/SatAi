@@ -15,6 +15,14 @@ from uuid import uuid4
 
 from PIL import Image, UnidentifiedImageError
 
+from backend.scene_pack import (
+    ScenePackError,
+    cached_scene,
+    identify_scene,
+    resolution_assets,
+    scene_asset,
+)
+
 # Keep model resolution offline before importing the model registry.
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
@@ -132,6 +140,12 @@ def local_scene_image(scene_id: str) -> Path | None:
         return candidate if candidate.is_file() else None
     if "/" in scene_id or "\\" in scene_id or ".." in scene_id:
         return None
+    try:
+        catalog_asset = scene_asset(scene_id)
+    except ScenePackError:
+        catalog_asset = None
+    if catalog_asset is not None:
+        return catalog_asset
     normalized = normalize_scene_id(scene_id)
     if "_gsd" not in normalized:
         return None
@@ -189,16 +203,21 @@ def ingest_scene(data: bytes, filename: str) -> dict[str, Any]:
             pass
 
     safe_filename = Path(filename.replace("\\", "/")).name or "upload"
+    try:
+        known_scene = identify_scene(target)
+    except ScenePackError:
+        known_scene = None
+    source = known_scene.get("source", {}) if known_scene else {}
     return {
         "scene_id": scene_id,
         "filename": safe_filename,
         "format": detected_format,
         "width": width,
         "height": height,
-        "sensor": None,
-        "gsd": None,
-        "location": None,
-        "acquisition_date": None,
+        "sensor": source.get("sensor"),
+        "gsd": str(source["gsd"]) if source.get("gsd") is not None else None,
+        "location": source.get("location"),
+        "acquisition_date": source.get("acquisition_date"),
     }
 
 
@@ -276,6 +295,67 @@ def _live_response(result: Any) -> dict[str, Any]:
     return response
 
 
+def _curated_cached_response(
+    match: dict[str, Any], scene_id: str, sensor: str | None, plan: Plan
+) -> dict[str, Any]:
+    entry = match["entry"]
+    row = match["row"]
+    prediction = row.get("prediction")
+    if not isinstance(prediction, dict):
+        raise ArtifactError("The curated cached result has no prediction.")
+    answer = prediction.get("answer")
+    evidence = prediction.get("evidence")
+    if not isinstance(answer, str) or not answer.strip() or not isinstance(evidence, list):
+        raise ArtifactError("The curated cached result is malformed.")
+    artifact = entry["artifact"]
+    try:
+        trace = append_record(
+            {
+                "model_name": artifact["model_name"],
+                "model_version": artifact["model_version"],
+                "params": {
+                    "capability": entry["capability"],
+                    "planner_version": plan.planner_version,
+                    "planner_rule": plan.rule_id,
+                    "requested_capability": plan.requested_capability,
+                    "execution_mode": "cached_result",
+                    "result_state": "cached_real",
+                    "results_artifact": artifact["path"],
+                    "scene_id": scene_id,
+                    "sensor": sensor,
+                    "source_scene_id": entry["source"]["source_id"],
+                    "evaluated_expression": entry["evaluated_expression"],
+                    "source_run_id": artifact.get("run_id"),
+                    "source_git_sha": artifact.get("git_sha"),
+                    "source_working_tree_sha256": artifact.get("working_tree_sha256"),
+                },
+                "input_summary": {
+                    "image_paths": [entry["source"]["source_id"]],
+                    "question": entry["question"],
+                    "n_images": 1,
+                },
+                "timestamp_iso": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+    except (TraceIntegrityError, OSError) as exc:
+        raise TracePersistenceError from exc
+    return {
+        "answer": answer.strip(),
+        "evidence": evidence,
+        "execution_mode": "cached_result",
+        "results_artifact": artifact["path"],
+        "model": {
+            "name": artifact["model_name"],
+            "version": artifact["model_version"],
+        },
+        "trace": trace,
+        "notice": (
+            "CACHED REAL: replaying the committed measured result for evaluated "
+            f"expression '{entry['evaluated_expression']}'. No live model ran."
+        ),
+    }
+
+
 def analyze_scene(
     scene_id: str,
     question: str,
@@ -316,6 +396,14 @@ def analyze_scene(
         return _cached_response(
             cached, sensor, "local scene pixels unavailable", plan
         )
+
+    if INGESTED_SCENE_ID.fullmatch(scene_id):
+        try:
+            curated = cached_scene(image_path, question, plan.selected_capability)
+        except ScenePackError as exc:
+            raise ArtifactError("Curated cached result could not be verified.") from exc
+        if curated is not None:
+            return _curated_cached_response(curated, scene_id, sensor, plan)
 
     try:
         result = execute_plan(
@@ -409,6 +497,10 @@ def capabilities_overview() -> dict[str, Any]:
 
 def resolution_report() -> dict[str, Any]:
     report = load_results()
+    try:
+        assets = resolution_assets()
+    except ScenePackError as exc:
+        raise ArtifactError("Resolution scene-pack manifest is invalid.") from exc
     return {
         "model": report["model"],
         "n_samples": report["n_samples"],
@@ -416,6 +508,7 @@ def resolution_report() -> dict[str, Any]:
         "provenance": report.get("provenance"),
         "per_rung": report["per_rung"],
         "degenerate_rungs": report["degenerate_rungs"],
+        "assets": assets,
     }
 
 
