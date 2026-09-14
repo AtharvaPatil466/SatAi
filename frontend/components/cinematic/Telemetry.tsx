@@ -11,7 +11,7 @@ export function Telemetry() {
       <div className="telemetry-lock">
         <span>ORBITAL LOCK</span>
         <span className="telemetry-rule" />
-        <span>19.08° N / 72.88° E</span>
+        <span>COORDS NOT RECORDED</span>
       </div>
       <div className="descent-readout">
         <span>APPROACH VECTOR</span>
