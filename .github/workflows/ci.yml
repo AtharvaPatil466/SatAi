@@ -1,0 +1,125 @@
+name: CI
+
+# Every phase in the implementation plan carries an exit criterion of the form
+# "the full hostile-input suite still passes". Across 13 weeks that is a manual
+# promise unless something enforces it on every push. This is that something.
+#
+# Scope is deliberately the 169 backend + orchestrator tests: they cover the whole
+# HTTP surface, the planner, the executor and the hash-chained ledger, and they run
+# without torch, transformers or streamlit — so the job installs six packages and
+# finishes in seconds rather than pulling a 1.5 GB ML stack on every commit.
+# eval/ and demo_gui/ need that stack and are excluded; run them locally.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # .python-version pins 3.11 (and the README repeats it), but the working
+        # venv is 3.13 and that is the only interpreter the suite has actually been
+        # run on. 3.11 also appears to be the Kaggle target. Rather than guess which
+        # is authoritative, test both — the job takes seconds, and this turns an
+        # undocumented mismatch into an empirical answer.
+        python-version: ["3.11", "3.13"]
+
+    name: test (py${{ matrix.python-version }})
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install coverage
+
+      - name: Confirm the heavy ML stack is genuinely absent
+        # If a light test ever starts importing torch, this job would quietly begin
+        # exercising a different code path than the one it claims to guard.
+        run: |
+          python - <<'PY'
+          import importlib.util, sys
+          heavy = [m for m in ("torch", "transformers", "streamlit")
+                   if importlib.util.find_spec(m) is not None]
+          if heavy:
+              sys.exit(f"Unexpectedly installed in the light CI env: {heavy}")
+          print("light environment confirmed")
+          PY
+
+      - name: Run backend + orchestrator + model-gate tests with coverage
+        # models/ is included because its tests inject a stub torch module rather
+        # than importing the real one — so the accelerator gate, which decides
+        # whether a number is reportable at all, is checked on every push.
+        run: python -m coverage run --source=backend,orchestrator,models -m pytest backend orchestrator models -q
+
+      - name: Coverage report
+        run: python -m coverage report --skip-empty
+
+      - name: Fail closed if the production ledger was touched
+        # A test that forgets to patch orchestrator.trace.TRACE_PATH appends real
+        # records to the repository's trace.jsonl. That happened once already; this
+        # makes it impossible to merge again without noticing.
+        run: |
+          if [ -n "$(git status --porcelain trace.jsonl)" ]; then
+            echo "::error::The test run modified trace.jsonl. A test is writing to the"
+            echo "::error::production ledger — patch TRACE_PATH to a temp dir in its setUp."
+            git --no-pager diff --stat trace.jsonl
+            exit 1
+          fi
+          echo "production ledger untouched"
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+      - name: No fabricated geographic coordinates in the UI
+        # The backend deliberately reports location: null because LoveDA carries no
+        # geographic coordinates. A hardcoded lat/lon in the frontend contradicts
+        # that and violates the project's zero-fabrication rule. Guard it.
+        working-directory: frontend
+        run: |
+          if grep -rnE '° ?[NSEW]|center: *\[ *-?7[0-9]\.' \
+               --include='*.tsx' --include='*.ts' app components lib; then
+            echo "::error::Hardcoded geographic coordinates found. The scene is not"
+            echo "::error::georeferenced; see ImageryViewer.tsx for the reasoning."
+            exit 1
+          fi
+          echo "no fabricated coordinates"

@@ -87,6 +87,11 @@ DEGENERATE_NO_RATE = 0.15
 # Below this many open-ended questions, open_accuracy is noise — see the
 # module docstring for the measured 2.5x swing that motivates the number.
 MIN_OPEN_SAMPLES = 500
+
+# Below this, a proportion is not an estimate — a 30-sample accuracy carries a 95% CI
+# roughly +/-18 points. Runs under this floor are still saved (they are useful for
+# debugging) but are never advertised as results worth committing.
+MIN_COMMITTABLE_SAMPLES = 30
 # A rung needs at least this many binary questions before its yes-rate is
 # meaningful enough to call degenerate. The real ladder has 200 per rung.
 MIN_BINARY_FOR_RUNG_GUARD = 30
@@ -315,7 +320,22 @@ def main() -> int:
     archived = RESULTS_DIR / f"{args.model}__{args.suite}__{stamp}Z.json"
     archived.write_text(payload, encoding="utf-8")
     print(f"[saved] {args.out}")
-    print(f"[saved] {archived.relative_to(ROOT)}  <- commit this")
+
+    # Only advertise a run as commit-worthy if it could be a real measurement.
+    # A mock model scores itself (its expected answers are its own output format), and a
+    # handful of samples is not an estimate of anything — labelling either "commit this"
+    # is how a fabricated 100% ends up in results/ looking like evidence.
+    n_scored = report.get("n", 0)
+    rel = archived.relative_to(ROOT)
+    if args.model == "mock":
+        print(f"[saved] {rel}  <- mock model: NOT a measurement, do not commit")
+    elif n_scored < MIN_COMMITTABLE_SAMPLES:
+        print(
+            f"[saved] {rel}  <- only {n_scored} sample(s) "
+            f"(floor {MIN_COMMITTABLE_SAMPLES}): too few to report, do not commit"
+        )
+    else:
+        print(f"[saved] {rel}  <- commit this")
 
     if warning:
         print(f"WARNING: {warning}")

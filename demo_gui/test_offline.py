@@ -1,6 +1,7 @@
 """Offline-contract verification for the cached Streamlit golden path."""
 
 import os
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -9,6 +10,7 @@ import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from demo_gui import golden_assets
+from orchestrator import trace
 
 APP_PATH = Path(__file__).with_name("app.py")
 
@@ -16,9 +18,20 @@ APP_PATH = Path(__file__).with_name("app.py")
 class OfflineGoldenPathTests(unittest.TestCase):
     def setUp(self) -> None:
         st.cache_data.clear()
+        # The cached golden path appends a trace record. Without this it lands in the
+        # repository's production trace.jsonl. Same isolation as test_golden_path.py.
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_records = trace.records()
+        trace._TRACE.clear()
+        self.path_patch = patch.object(trace, "TRACE_PATH", Path(self.temp_dir.name) / "trace.jsonl")
+        self.path_patch.start()
 
     def tearDown(self) -> None:
         st.cache_data.clear()
+        self.path_patch.stop()
+        trace._TRACE.clear()
+        trace._TRACE.extend(self.original_records)
+        self.temp_dir.cleanup()
 
     def test_cached_golden_path_forces_offline_mode_and_never_connects(self) -> None:
         hostile_environment = {

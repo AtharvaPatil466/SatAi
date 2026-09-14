@@ -12,7 +12,7 @@ Contract-first scaffold for a multi-agent geospatial visual-question-answering s
 
 `orchestrator/` owns registration, routing, and hash-chained traces. It must communicate with models only through `Model.infer()` and must never inspect implementation internals; every routed call must append a trace record.
 
-`eval/` owns authoritative metrics, smoke verification, and suite loader stubs. Reported evaluation numbers are valid only when produced by `eval/eval.py`, using exact case-insensitive stripped answer matching.
+`eval/` owns authoritative metrics, smoke verification, and suite loader stubs. Reported evaluation numbers are valid only when produced by `eval/eval.py`. Answer matching is **lenient, not exact** — see `answer_matches()`: after case-folding and stripping it accepts an exact match, treats `1` as `yes`, and then accepts the expected answer appearing as a whole word inside a longer response, both before and after normalising number words (`three` → `3`). Every committed number was produced under these rules, so stating a stricter rule here would misdescribe them.
 
 `scripts/` owns configuration-driven training entry points. It may select a registered model by name, but must not embed model-specific training logic or reach into model internals.
 
