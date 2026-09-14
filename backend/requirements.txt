@@ -4,3 +4,7 @@ pydantic>=2.10,<3
 httpx>=0.28,<1
 pytest>=8,<9
 python-multipart==0.0.22
+# backend/services.py imports PIL at module scope for upload decoding, so the
+# backend cannot even be imported without this. It was missing: a clean install
+# from this file failed at `from PIL import Image`, which CI caught on first run.
+pillow>=11,<12
