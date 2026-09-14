@@ -100,7 +100,6 @@ class QwenVLModel(Model):
         answer = self._generate_answer(image_paths, question).strip()
         return {
             "answer": answer,
-            # Placeholder only: frozen generation does not provide calibrated confidence.
-            "confidence": 1.0,
+            "confidence": None,
             "evidence": [],
         }
