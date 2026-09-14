@@ -1,9 +1,25 @@
 """Lazy, inference-only Qwen2.5-VL wrapper."""
 
+import os
+import warnings
 from pathlib import Path
 from typing import Any
 
 from models.base import Model
+
+# Opt-in only. Apple MPS lets this model run on a developer Mac, which is the
+# difference between iterating locally and not being able to execute the live path
+# at all. It is NOT a substitute for the rented GPU: MPS uses different kernels and a
+# different accumulation order, so a number produced here is not comparable with the
+# committed CUDA baselines. Requiring an explicit environment variable keeps that a
+# deliberate act rather than something a laptop starts doing silently.
+ALLOW_MPS_ENV = "SATQUERY_ALLOW_MPS"
+
+NO_ACCELERATOR_ERROR = (
+    "Qwen2.5-VL inference requires a CUDA GPU for this baseline; use the Kaggle T4 "
+    f"runner. For local iteration only, set {ALLOW_MPS_ENV}=1 to permit Apple MPS — "
+    "its output is not a baseline number and must never be reported as one."
+)
 
 
 class QwenVLModel(Model):
@@ -18,6 +34,32 @@ class QwenVLModel(Model):
         self._model: Any | None = None
         self._processor: Any | None = None
         self._process_vision_info: Any | None = None
+        # Set by _load(). "cuda" for reportable runs, "mps" for local iteration only.
+        # Read this before quoting any number this model produced.
+        self.device: str | None = None
+
+    @staticmethod
+    def _resolve_device(torch: Any) -> str:
+        """Pick the accelerator, or fail closed.
+
+        CUDA is the only device whose numbers are comparable with the committed
+        baselines. MPS is permitted solely as an explicit, opt-in escape hatch for
+        local iteration. Absent both, this raises rather than silently falling back
+        to CPU: a 3B model on CPU would appear to work while taking minutes per
+        question, which is a worse failure than an honest refusal.
+        """
+        if torch.cuda.is_available():
+            return "cuda"
+        if os.environ.get(ALLOW_MPS_ENV) == "1" and torch.backends.mps.is_available():
+            warnings.warn(
+                f"Running Qwen2.5-VL on Apple MPS because {ALLOW_MPS_ENV}=1. This is "
+                "for local iteration only — the result is NOT comparable with the "
+                "committed CUDA baselines and must not be reported as a measurement.",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+            return "mps"
+        raise RuntimeError(NO_ACCELERATOR_ERROR)
 
     def _load(self) -> None:
         """Load weights only on the first real inference call."""
@@ -31,15 +73,21 @@ class QwenVLModel(Model):
             raise RuntimeError(
                 "Qwen inference requires transformers>=4.49, qwen-vl-utils, accelerate, and torch"
             ) from exc
-        if not torch.cuda.is_available():
-            raise RuntimeError(
-                "Qwen2.5-VL inference requires a CUDA GPU for this baseline; use the Kaggle T4 runner"
+        device = self._resolve_device(torch)
+        if device == "cuda":
+            self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                self.model_id,
+                torch_dtype=torch.float16,
+                device_map="auto",
             )
-        self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            self.model_id,
-            torch_dtype=torch.float16,
-            device_map="auto",
-        )
+        else:
+            # device_map="auto" dispatches through accelerate, which does not place
+            # reliably on Apple Silicon; move the whole model explicitly instead.
+            self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                self.model_id,
+                torch_dtype=torch.float16,
+            ).to(device)
+        self.device = device
         self._model.eval()
         for parameter in self._model.parameters():
             parameter.requires_grad_(False)

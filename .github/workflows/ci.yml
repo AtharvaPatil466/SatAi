@@ -67,8 +67,11 @@ jobs:
           print("light environment confirmed")
           PY
 
-      - name: Run backend + orchestrator tests with coverage
-        run: python -m coverage run --source=backend,orchestrator -m pytest backend orchestrator -q
+      - name: Run backend + orchestrator + model-gate tests with coverage
+        # models/ is included because its tests inject a stub torch module rather
+        # than importing the real one — so the accelerator gate, which decides
+        # whether a number is reportable at all, is checked on every push.
+        run: python -m coverage run --source=backend,orchestrator,models -m pytest backend orchestrator models -q
 
       - name: Coverage report
         run: python -m coverage report --skip-empty
