@@ -9,7 +9,7 @@ export function RuntimeStatus() {
   const ready = state === "ready";
   return (
     <div className="panel flex items-center justify-between p-5">
-      <div><p className="eyebrow">Local API</p><p className="mt-2 font-semibold">{state === "checking" ? "Checking runtime…" : ready ? "Operational" : "Not connected"}</p></div>
+      <div><p className="eyebrow">Local API</p><p className="mt-2 font-[500]">{state === "checking" ? "Checking runtime…" : ready ? "Operational" : "Not connected"}</p></div>
       <span className={cnDot(ready, state)} />
     </div>
   );

@@ -1,10 +1,13 @@
-import { GOLDEN_SCENE } from "@/lib/workspace-contract";
+// Deliberately not a map pin: LoveDA is a dataset, not a place, and this scene carries
+// no geographic coordinates. See ImageryViewer for the same reasoning.
+import { Database, ScanLine } from "lucide-react";
 
 export function SceneMetadata() {
   return (
-    <div className="mt-4 p-4 bg-surface-elevated border border-border rounded-16">
-      <p className="eyebrow">Scene</p><p className="mt-1 break-all font-mono text-sm text-subtitle">{GOLDEN_SCENE.id}</p>
-      <dl className="mt-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">{[["Dataset / source", GOLDEN_SCENE.source], ["GSD", `${GOLDEN_SCENE.gsd} m`], ["Sensor", "Unknown"], ["Location", "Unknown"], ["Acquisition date", "Unknown"]].map(([label, value]) => <div key={label}><dt className="text-tertiary">{label}</dt><dd className="mt-1 text-subtitle">{value}</dd></div>)}</dl>
+    <div className="panel mt-4 grid gap-4 p-4 sm:grid-cols-[1fr_auto_auto] sm:items-center">
+      <div className="min-w-0"><p className="eyebrow">Scene</p><p className="mt-1 truncate font-mono text-xs text-deepgray">loveda_LoveDA_images_png_0_gsd0.3</p></div>
+      <div className="flex items-center gap-2 text-sm text-deepgray"><Database size={15} className="text-ash" /> LoveDA</div>
+      <div className="flex items-center gap-2 text-sm text-deepgray"><ScanLine size={15} className="text-ash" /> 0.3 m GSD</div>
     </div>
   );
 }

@@ -2,37 +2,81 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { color-scheme: dark; }
+:root {
+  color-scheme: light;
+  --color-ink: #1d1d1f;
+  --color-midgray: #707070;
+  --color-canvas: #f5f5f7;
+  --color-paper: #ffffff;
+  --color-electric: #0071e3;
+}
 
-/* Custom radius utilities */
+* { box-sizing: border-box; }
+
+html { background: var(--color-paper); }
+
+body {
+  margin: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-weight: 400;
+  letter-spacing: -0.022em; /* SF Pro Text body tightening */
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* SF Pro Display — weighty, tightly-tracked headlines floating in white space. */
+h1 {
+  font-weight: 700;
+  letter-spacing: -0.028em;
+  line-height: 1.06;
+  color: var(--color-ink);
+}
+h2, h3, h4 {
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  line-height: 1.14;
+  color: var(--color-ink);
+}
+
+::selection { background: rgba(0, 113, 227, 0.18); }
+
+button, input, select, textarea { font: inherit; }
+
+/* Feature card — flat, borderless, 28px radius, canvas-gray surface. */
+.panel {
+  @apply rounded-cards bg-surface;
+  border: none;
+}
+
+.eyebrow {
+  @apply text-[0.8rem] uppercase tracking-[0.02em] text-midgray;
+  font-weight: 500;
+}
+
+.muted { @apply text-[17px] leading-relaxed text-midgray; }
+
+/* Whisper grid — barely-there, on the light canvas. */
+.grid-overlay {
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.025) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.maplibregl-control-container { display: none; }
+
+.prose-annotation p { margin: 0.65rem 0; }
+.prose-annotation strong { color: var(--color-ink); }
+
+/* ---- Cinematic landing support (from remote main) ---- */
+
 @layer utilities {
   .rounded-16 { border-radius: 16px; }
   .rounded-24 { border-radius: 24px; }
 }
 
-* { box-sizing: border-box; }
-
-html { background: #0b101d; }
-
-body {
-  margin: 0;
-  min-height: 100vh;
-  background-color: #0b101d;
-  background-image:
-    linear-gradient(rgba(56, 189, 248, 0.022) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(56, 189, 248, 0.022) 1px, transparent 1px);
-  background-size: 36px 36px;
-  color: #f1f5f9;
-  font-family: var(--font-sans, Inter), sans-serif;
-  font-weight: 400;
-  line-height: 1.5;
-}
-
-::selection { background: rgba(6, 182, 212, 0.3); }
-
-button, input, select, textarea { font: inherit; }
-
-/* Surface hierarchy */
+/* Cinematic-only surface + text helpers (not used by Apple app pages) */
 .surface { background: #121a2d; }
 .surface-elevated { background: #080c17; }
 
@@ -43,20 +87,6 @@ button, input, select, textarea { font: inherit; }
 .text-inverse { color: #0c0c0c; }
 .text-accent { color: #38bdf8; }
 
-/* Panel composite class */
-.panel {
-  @apply rounded-md border border-border bg-surface shadow-panel;
-}
-
-/* Eyebrow */
-.eyebrow {
-  @apply text-xs font-bold uppercase tracking-[0.1em] text-subtitle;
-}
-
-/* Muted */
-.muted { @apply text-sm leading-relaxed text-tertiary; }
-
-/* Restrained button */
 .btn-restrained {
   @apply rounded-24 border border-border bg-transparent px-4 py-2.5 text-sm font-black tracking-wide text-onyx transition hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-60;
 }
@@ -66,10 +96,6 @@ button, input, select, textarea { font: inherit; }
 .space-12 > * + * { @apply space-x-12; }
 .space-24 > * + * { @apply space-x-24; }
 .space-64 > * + * { @apply space-x-64; }
-
-/* Prose adjustments */
-.prose-annotation p { margin: 0.65rem 0; }
-.prose-annotation strong { color: #e0f2fe; }
 
 /* Cinematic landing experience */
 .cinematic-story {
