@@ -94,7 +94,7 @@ export default function Work() {
                   className="absolute inset-0 opacity-30"
                   style={{
                     backgroundImage:
-                      "linear-gradient(rgba(71,215,221,0.15) 1px, transparent 1px), linear-gradient(90deg, rgba(71,215,221,0.15) 1px, transparent 1px)",
+                      "linear-gradient(rgba(255,237,215,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255,237,215,0.08) 1px, transparent 1px)",
                     backgroundSize: "32px 32px",
                   }}
                 />
@@ -104,7 +104,7 @@ export default function Work() {
                   </span>
                   <span
                     className="text-xs font-bold tracking-[0.25em] uppercase px-3 py-1 rounded-full"
-                    style={{ background: "rgba(71,215,221,0.15)", color: "#47d7dd" }}
+                    style={{ background: "#382416", color: "#ffedd7" }}
                   >
                     {cap.tag}
                   </span>

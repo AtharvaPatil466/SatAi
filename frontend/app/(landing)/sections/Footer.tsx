@@ -105,7 +105,7 @@ export default function Footer() {
         </div>
 
         <div className="flex flex-col md:flex-row items-center justify-between mt-20 pt-8 border-t border-white/10">
-          <p className="text-white/30 text-xs mb-4 md:mb-0 font-mono">
+          <p className="landing-credit text-xs mb-4 md:mb-0 font-mono">
             © SIH 2026 — sohamsssssssssssssssss
           </p>
           <button

@@ -5,21 +5,43 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: "#ffffff",
-        surface: "#f3f5f8",
-        raised: "#edf1f6",
-        border: "#dfe5ee",
-        accent: "#245bdb",
-        success: "#16713d",
-        warning: "#855400",
-        error: "#b42332",
+        // Vivid+Co — prismatic light through obsidian. Monochrome bone-on-void;
+        // the only chromatic voice is the prism artifact (never on UI chrome).
+        background: "#101010", // obsidian canvas
+        surface: "#495764", // graphite veil — content surface
+        raised: "#202027", // subtle lift above the void
+        border: "#403f3f", // ash hairline
+        accent: "#fffdf9", // bone white — Vivid has no separate accent color
+
+        // Named Vivid tokens
+        obsidian: "#101010",
+        bone: "#fffdf9",
+        graphite: "#495764",
+        ash: "#403f3f",
+        fog: "#6f879c", // muted secondary text
+        // Prism channels — used ONLY inside the brand artifact, never UI.
+        "prism-red": "#ff2a2a",
+        "prism-cyan": "#2a7fff",
+        "prism-lime": "#2aff2a",
+
+        // Functional status — kept muted; system stays monochrome otherwise.
+        success: "#9ab487",
+        warning: "#d9a05f",
+        error: "#db8278",
       },
       boxShadow: {
-        panel: "0 18px 50px rgba(0, 0, 0, 0.22)",
-        glow: "0 0 30px rgba(71, 215, 221, 0.12)",
+        // Flat by design — no elevation anywhere.
+        panel: "none",
+        glow: "none",
+      },
+      borderRadius: {
+        cards: "15px",
+        nav: "5px",
       },
       fontFamily: {
-        sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
+        // Neue Montreal (exclusive typeface) → Inter substitute.
+        sans: ["var(--font-neue)", "Inter", "ui-sans-serif", "system-ui", "sans-serif"],
+        display: ["var(--font-neue)", "Inter", "ui-sans-serif", "system-ui", "sans-serif"],
         mono: ["IBM Plex Mono", "ui-monospace", "SFMono-Regular", "monospace"],
       },
     },

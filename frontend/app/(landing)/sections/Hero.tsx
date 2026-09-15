@@ -377,12 +377,12 @@ export default function Hero() {
             </span>
           </div>
 
-          {/* Big Cinematic Heading */}
+          {/* Big Cinematic Heading — Vivid+Co weight 400, scale-driven, prism accent */}
           <div className="overflow-hidden mb-6">
-            <h1 className="text-[clamp(2.5rem,7vw,6.5rem)] font-black uppercase leading-[0.88] tracking-tight text-white drop-shadow-2xl">
+            <h1 className="text-[clamp(2.75rem,8vw,7.5rem)] font-normal uppercase leading-[0.98] tracking-[-0.02em] text-bone">
               <span>{currentCh.title}</span>
               <br />
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-teal-300 to-indigo-400">
+              <span className="prism-text prism-shimmer">
                 {currentCh.highlight}
               </span>
             </h1>
@@ -397,10 +397,11 @@ export default function Hero() {
           <div className="flex flex-wrap items-center gap-4">
             <a
               href="/workspace"
-              className="inline-flex items-center gap-2.5 px-6 py-3.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-bold text-sm rounded-lg shadow-[0_0_25px_rgba(6,182,212,0.4)] hover:shadow-[0_0_35px_rgba(6,182,212,0.6)] transition-all hover:scale-105 active:scale-95 cursor-pointer"
+              className="group inline-flex items-center gap-2.5 px-6 py-3.5 border border-bone text-bone text-sm uppercase tracking-[0.04em] transition-colors duration-500 hover:bg-bone hover:text-obsidian cursor-pointer"
+              style={{ transitionTimingFunction: "cubic-bezier(0.52,0.01,0,1)" }}
             >
-              <Satellite className="w-4 h-4 text-black" />
-              <span>LAUNCH WORKSPACE</span>
+              <Satellite className="w-4 h-4" />
+              <span>Launch Workspace</span>
               <ArrowRight className="w-4 h-4" />
             </a>
             <a
@@ -409,9 +410,9 @@ export default function Hero() {
                 e.preventDefault();
                 document.querySelector("#work")?.scrollIntoView({ behavior: "smooth" });
               }}
-              className="inline-flex items-center gap-2 px-5 py-3.5 rounded-lg bg-white/10 hover:bg-white/15 border border-white/20 text-white font-semibold text-sm backdrop-blur-md transition-colors cursor-pointer"
+              className="inline-flex items-center gap-2 px-1 py-3.5 text-bone/70 text-sm uppercase tracking-[0.04em] transition-colors duration-500 hover:text-bone cursor-pointer link-underline-landing"
             >
-              <span>EXPLORE CAPABILITIES ↓</span>
+              <span>Explore capabilities ↓</span>
             </a>
           </div>
         </div>

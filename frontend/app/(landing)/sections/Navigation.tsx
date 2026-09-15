@@ -58,11 +58,8 @@ export default function Navigation() {
 
           <a
             href="/workspace"
-            className={`hidden lg:block text-sm font-semibold px-4 py-2 rounded transition-all duration-300 ${
-              isScrolled
-                ? "bg-black text-white hover:bg-gray-800"
-                : "bg-white text-black hover:bg-white/90"
-            }`}
+            className="hidden lg:block text-sm px-4 py-2 border border-bone text-bone uppercase tracking-[0.04em] transition-colors duration-500 hover:bg-bone hover:text-obsidian"
+            style={{ borderRadius: "5px", transitionTimingFunction: "cubic-bezier(0.52,0.01,0,1)" }}
           >
             OPEN APP →
           </a>

@@ -68,7 +68,7 @@ export default function About() {
                 className="absolute inset-0 opacity-30"
                 style={{
                   backgroundImage:
-                    "linear-gradient(rgba(71,215,221,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(71,215,221,0.1) 1px, transparent 1px)",
+                    "linear-gradient(rgba(255,237,215,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255,237,215,0.08) 1px, transparent 1px)",
                   backgroundSize: "40px 40px",
                 }}
               />

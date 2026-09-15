@@ -2,85 +2,136 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { color-scheme: light; }
+:root {
+  color-scheme: dark;
+  /* Vivid+Co — prismatic light through obsidian */
+  --color-bone: #fffdf9;
+  --color-obsidian: #101010;
+  --color-graphite: #495764;
+  --color-ash: #403f3f;
+  --color-fog: #6f879c;
+  --color-prism-red: #ff2a2a;
+  --color-prism-cyan: #2a7fff;
+  --color-prism-lime: #2aff2a;
+  /* Signature optical-focus easing */
+  --ease-focus: cubic-bezier(0.52, 0.01, 0, 1);
+}
 
 * { box-sizing: border-box; }
 
-html { background: #fff; }
+html { background: var(--color-obsidian); }
 
 body {
   margin: 0;
-  background: #fff;
-  color: #172b4d;
+  background: var(--color-obsidian);
+  color: var(--color-bone);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  font-feature-settings: "ss01" on;
+  -webkit-font-smoothing: antialiased;
 }
 
-::selection { background: rgba(36, 91, 219, 0.28); }
+::selection { background: rgba(255, 253, 249, 0.18); }
 
 button, input, select, textarea { font: inherit; }
 
 .panel {
-  @apply rounded-md border border-border bg-surface;
+  @apply border border-border;
+  background: #17171c;
+  border-radius: 15px;
+  box-shadow: none;
 }
 
 .eyebrow {
-  @apply text-[0.68rem] font-bold uppercase tracking-[0.18em] text-accent;
+  @apply text-[0.72rem] uppercase text-fog;
+  font-weight: 400;
+  letter-spacing: 0.02em;
 }
 
-.muted { @apply text-sm leading-relaxed; color: #56657a; }
+.muted { @apply text-sm leading-relaxed; color: var(--color-fog); }
 
 .grid-overlay {
   background-image:
-    linear-gradient(rgba(36, 91, 219, 0.055) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(36, 91, 219, 0.055) 1px, transparent 1px);
+    linear-gradient(rgba(255, 253, 249, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 253, 249, 0.05) 1px, transparent 1px);
   background-size: 32px 32px;
 }
 
 .instrument-grid {
   background-image:
-    linear-gradient(rgba(36, 91, 219, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(36, 91, 219, 0.04) 1px, transparent 1px),
-    radial-gradient(circle at 50% 35%, rgba(23, 43, 57, 0.2), transparent 60%);
+    linear-gradient(rgba(255, 253, 249, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 253, 249, 0.04) 1px, transparent 1px),
+    radial-gradient(circle at 50% 35%, rgba(73, 87, 100, 0.35), transparent 60%);
   background-size: 40px 40px, 40px 40px, auto;
 }
+
+/* Prism chromatic-aberration treatment — the brand's only chromatic voice.
+   RGB channel-split shadow behind bone-white display type. */
+.prism-text {
+  color: var(--color-bone);
+  text-shadow:
+    -0.02em 0 0 rgba(255, 42, 42, 0.55),
+    0.02em 0 0 rgba(42, 127, 255, 0.55),
+    0 0.015em 0 rgba(42, 255, 42, 0.35);
+}
+@keyframes prism-shimmer {
+  0%, 100% {
+    text-shadow:
+      -0.02em 0 0 rgba(255, 42, 42, 0.5),
+      0.02em 0 0 rgba(42, 127, 255, 0.5),
+      0 0.015em 0 rgba(42, 255, 42, 0.3);
+  }
+  50% {
+    text-shadow:
+      -0.035em 0 0 rgba(255, 42, 42, 0.7),
+      0.035em 0 0 rgba(42, 127, 255, 0.7),
+      0 0.03em 0 rgba(42, 255, 42, 0.45);
+  }
+}
+.prism-shimmer { animation: prism-shimmer 6.65s var(--ease-focus) infinite; }
 
 @keyframes result-in {
   from { opacity: 0; transform: translateY(5px); }
   to { opacity: 1; transform: translateY(0); }
 }
-
 .result-reveal { animation: result-in 180ms ease-out both; }
 
 @media (prefers-reduced-motion: reduce) {
-  .result-reveal { animation: none; }
+  .result-reveal, .prism-shimmer { animation: none; }
 }
 
 .maplibregl-control-container { display: none; }
 
 .prose-annotation p { margin: 0.65rem 0; }
-.prose-annotation strong { color: #172b4d; }
+.prose-annotation strong { color: var(--color-bone); }
 
-/* Shared light palette for legacy component color classes, including drawers. */
-.app-shell :is([class*="bg-[#"], [class*="bg-background"]) { background-color: #fff; }
-.app-shell :is([class*="bg-raised"], .instrument-grid) { background-color: #f3f5f8; }
-.app-shell .instrument-grid { background-image: none; }
-.app-shell :is([class~="text-white"], [class~="text-slate-100"], [class~="text-slate-200"], [class~="text-slate-300"]) { color: #172b4d; }
-.app-shell :is([class~="text-slate-400"], [class~="text-slate-500"], [class~="text-slate-600"], [class~="text-slate-700"]) { color: #56657a; }
-.app-shell [class*="border-border"] { border-color: #dfe5ee; }
-.app-shell [class~="text-accent"] { color: #245bdb; }
-.app-shell [class*="bg-accent/"] { background-color: #edf3ff; }
-.app-shell [class~="bg-accent"] { background-color: #245bdb; color: #fff; }
-.app-shell [class~="text-warning"] { color: #855400; }
-.app-shell [class~="text-success"] { color: #16713d; }
-.app-shell [class~="text-error"] { color: #b42332; }
-.app-shell button:hover { border-color: #245bdb; }
-.app-shell :is(input, select, textarea) { accent-color: #245bdb; }
-.app-shell :is(input, textarea)::placeholder { color: #67758a; }
-.app-shell [class~="bg-accent"]:hover { background-color: #1d4bb8; color: #fff; }
-.app-shell aside[aria-label="Analysis"] { background: #f8fafc; }
-.app-shell aside[aria-label="Analysis"] > section { margin: 12px; border-radius: 12px; background: #f3f5f8; }
+/* Vivid+Co palette remap for legacy component color classes, incl. drawers. */
+.app-shell { background: var(--color-obsidian); color: var(--color-bone); }
+.app-shell :is([class*="bg-[#"], [class*="bg-background"]) { background-color: var(--color-obsidian); }
+.app-shell :is([class*="bg-raised"], .instrument-grid) { background-color: #17171c; }
+.app-shell :is([class~="text-white"], [class~="text-slate-100"], [class~="text-slate-200"], [class~="text-slate-300"]) { color: var(--color-bone); }
+.app-shell :is([class~="text-slate-400"], [class~="text-slate-500"], [class~="text-slate-600"], [class~="text-slate-700"]) { color: var(--color-fog); }
+.app-shell [class*="border-border"] { border-color: var(--color-ash); }
+.app-shell [class~="text-accent"] { color: var(--color-bone); }
+.app-shell [class*="bg-accent/"] { background-color: rgba(255, 253, 249, 0.08); }
+.app-shell [class~="bg-accent"] { background-color: #17171c; color: var(--color-bone); }
+.app-shell [class~="text-warning"] { color: #d9a05f; }
+.app-shell [class~="text-success"] { color: #9ab487; }
+.app-shell [class~="text-error"] { color: #db8278; }
+.app-shell :is(button, a) { font-weight: 400; }
+.app-shell :is(button, [role="button"]) { border-radius: 0; text-transform: uppercase; letter-spacing: 0.02em; }
+.app-shell :is(h1, h2, h3, th, dt, summary, nav) { font-weight: 400; text-transform: uppercase; letter-spacing: 0.01em; }
+.app-shell button:hover { border-color: var(--color-bone); }
+.app-shell :is(input, select, textarea) { accent-color: var(--color-bone); background: transparent; border-radius: 0; }
+.app-shell :is(input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), select, textarea) { border-width: 0 0 1px; border-color: var(--color-bone); }
+.app-shell :is(input, textarea)::placeholder { color: var(--color-fog); }
+.app-shell [class~="bg-accent"]:hover { background-color: #17171c; color: var(--color-bone); }
+.app-shell [class*="shadow-"] { box-shadow: none; }
+.app-shell aside[aria-label="Analysis"] { background: var(--color-obsidian); }
+.app-shell aside[aria-label="Analysis"] > section { margin: 12px; border-radius: 15px; background: #17171c; }
 
 /* Landing page — hide AppShell chrome, go full-bleed */
-body:has(.landing-page) { background: #fff; color: #000; }
+body:has(.landing-page) { background: var(--color-obsidian); color: var(--color-bone); }
 body:has(.landing-page) > * > .lg\:grid { display: block !important; }
 body:has(.landing-page) aside,
 body:has(.landing-page) header[class*="TopBar"],
@@ -104,10 +155,44 @@ body:has(.landing-page) div[class*="lg:h-screen"] {
   overflow: visible !important;
 }
 
-/* Landing page link underline animation */
-.link-underline-landing {
-  position: relative;
-}
+/* Landing page — Vivid+Co monochrome-on-obsidian system. */
+.landing-page { background: var(--color-obsidian); color: var(--color-bone); }
+.landing-page section { min-height: 100vh; }
+.landing-page :is([class~="bg-white"], [class~="bg-gray-50"], [class~="bg-black"]) { background-color: var(--color-obsidian); }
+.landing-page :is([class*="from-slate"], [class*="to-slate"]) { --tw-gradient-from: #17171c; --tw-gradient-to: var(--color-obsidian); }
+.landing-page :is([class~="text-black"], [class~="text-white"], [class~="text-gray-800"], [class~="text-gray-100"]) { color: var(--color-bone); }
+.landing-page :is([class*="text-white/"], [class~="text-gray-400"], [class~="text-gray-500"], [class~="text-gray-600"]) { color: var(--color-fog); }
+/* Neutralize every cyan/teal/indigo/emerald accent → bone (prism stays only in .prism-text). */
+.landing-page :is([class*="text-cyan"], [class*="text-teal"], [class*="text-indigo"], [class*="text-blue"]) { color: var(--color-bone); }
+.landing-page [class*="text-emerald"] { color: var(--color-fog); }
+.landing-page .text-transparent { color: var(--color-bone); background-image: none; -webkit-text-fill-color: var(--color-bone); }
+.landing-page :is([class*="bg-cyan"], [class*="bg-teal"], [class*="bg-indigo"], [class*="bg-blue"]) { background-color: #17171c; }
+.landing-page [class*="bg-emerald"] { background-color: #17171c; }
+.landing-page [class~="bg-white/5"] { background-color: rgba(255, 253, 249, 0.05); }
+.landing-page [class~="bg-white/10"] { background-color: rgba(255, 253, 249, 0.08); }
+.landing-page [class~="bg-white/15"] { background-color: rgba(255, 253, 249, 0.12); }
+.landing-page [class~="bg-white/20"] { background-color: rgba(255, 253, 249, 0.16); }
+.landing-page [class~="bg-white/90"], .landing-page [class~="bg-white/95"] { background-color: rgba(16, 16, 16, 0.9); }
+.landing-page [class~="bg-black/0"] { background-color: transparent; }
+.landing-page [class~="bg-black/10"] { background-color: rgba(16, 16, 16, 0.1); }
+.landing-page [class~="bg-black/40"] { background-color: rgba(16, 16, 16, 0.4); }
+.landing-page [class~="bg-black/60"] { background-color: rgba(16, 16, 16, 0.6); }
+.landing-page :is([class*="from-cyan"], [class*="from-teal"], [class*="from-blue"], [class*="from-indigo"]) { background-image: none; background-color: #17171c; }
+.landing-page a[class~="bg-white"], .landing-page a[class~="bg-black"] { background: #17171c; color: var(--color-bone); }
+.landing-page :is([class*="border-white"], [class*="border-cyan"], [class*="border-emerald"], [class*="border-blue"], [class*="divide-gray"] *) { border-color: var(--color-ash); }
+.landing-page :is([class*="shadow"], [class*="drop-shadow"]) { box-shadow: none; filter: none; }
+/* Weight 400, no forced uppercase on display headings — scale carries hierarchy. */
+.landing-page :is(h1, h2, h3, nav, button, a) { font-weight: 400; letter-spacing: -0.01em; text-transform: none; }
+.landing-page :is(button, a[class*="px-"]) { border-radius: 0; }
+.landing-page [class*="rounded-lg"], .landing-page [class*="rounded-2xl"], .landing-page [class*="rounded-xl"] { border-radius: 15px; }
+.landing-page [class*="rounded-full"] { border-radius: 9999px; }
+.landing-page .service-item:hover { background: #17171c; }
+.landing-page [class*="hover:text-cyan"]:hover { color: var(--color-fog); }
+.landing-page .landing-credit { color: var(--color-prism-cyan); }
+.landing-page .link-underline-landing::after { background: var(--color-bone); }
+
+/* Landing page link underline animation — signature optical-focus easing. */
+.link-underline-landing { position: relative; }
 .link-underline-landing::after {
   content: '';
   position: absolute;
@@ -116,9 +201,12 @@ body:has(.landing-page) div[class*="lg:h-screen"] {
   width: 0;
   height: 1px;
   background: currentColor;
-  transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: width 0.5s var(--ease-focus);
 }
 .link-underline-landing:hover::after { width: 100%; }
+
+/* All meaningful landing transitions ride the optical-focus curve. */
+.landing-page :is(a, button, nav) { transition-timing-function: var(--ease-focus); transition-duration: 0.5s; }
 
 /* Smooth scroll for landing */
 html:has(.landing-page) { scroll-behavior: smooth; }
