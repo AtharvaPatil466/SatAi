@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { downloadPdf } from "@/lib/report";
 import { EvidencePanel } from "./EvidencePanel";
 import type { EvidenceRecord, TraceRecord } from "@/lib/types";
 
@@ -33,20 +34,22 @@ describe("EvidencePanel: execution provenance is never lost", () => {
   it("renders provenance and the raw trace drawer with no evidence prop, as /executions does", () => {
     render(<EvidencePanel trace={trace} />);
     expect(screen.getByText("Execution provenance")).toBeTruthy();
-    expect(screen.getByText("grounding-dino-swint")).toBeTruthy();
+    expect(screen.getByText(/grounding-dino-swint/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /view execution/i }));
     expect(screen.getByText(trace.record_hash)).toBeTruthy();
     expect(screen.getByText("Locate the building.")).toBeTruthy();
-    expect(screen.getByText(/raw execution evidence/i)).toBeTruthy();
+    expect(screen.getByText(/technical record/i)).toBeTruthy();
     // Visual evidence is an analysis concern, absent from a bare trace listing.
     expect(screen.queryByText("Visual evidence")).toBeNull();
   });
 
   it("keeps provenance visible alongside grounding evidence", () => {
     render(<EvidencePanel trace={trace} evidence={[boxRecord("building", [0.1, 0.2, 0.7, 0.8])]} />);
-    expect(screen.getByText("Visual evidence")).toBeTruthy();
+    expect(screen.getByText("Evidence")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /view execution/i }));
     expect(screen.getByText("Execution provenance")).toBeTruthy();
     expect(screen.getByText(trace.record_hash)).toBeTruthy();
-    expect(screen.getByText("phase0-rules-v1")).toBeTruthy();
+    expect(screen.getByText(/grounding_spatial_localization · phase0-rules-v1/)).toBeTruthy();
   });
 });
 
@@ -72,9 +75,10 @@ describe("EvidencePanel: grounding evidence list", () => {
     expect(screen.getByText("2 / 2 drawable")).toBeTruthy();
   });
 
-  it("says confidence was not reported rather than showing a made-up number", () => {
+  it("omits confidence when the provider did not report it", () => {
     render(<EvidencePanel trace={trace} evidence={[boxRecord("pier", [0.2, 0.1, 0.4, 0.3], null)]} />);
-    expect(evidenceItems()[0].textContent).toContain("confidence not reported");
+    expect(evidenceItems()[0].textContent).not.toContain("confidence");
+    expect(evidenceItems()[0].textContent).not.toContain("%");
   });
 
   it("explains an unsupported evidence type instead of drawing it", () => {
@@ -89,8 +93,9 @@ describe("EvidencePanel: grounding evidence list", () => {
 describe("EvidencePanel: evidence absent", () => {
   it("states that a cached VQA result carried no grounding evidence and still shows its provenance", () => {
     render(<EvidencePanel trace={cachedTrace} evidence={null} />);
-    expect(screen.getByText(/returned no grounding evidence/i)).toBeTruthy();
+    expect(screen.getByText(/no spatial evidence was produced/i)).toBeTruthy();
     expect(screen.queryByTestId("grounding-evidence-list")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /view execution/i }));
     expect(screen.getByText("cached_result")).toBeTruthy();
     expect(screen.getByText("single_image_vqa")).toBeTruthy();
     expect(screen.getByText("Is there a building in this image?")).toBeTruthy();
@@ -98,8 +103,8 @@ describe("EvidencePanel: evidence absent", () => {
 
   it("handles a provider that reported an explicitly empty evidence list", () => {
     render(<EvidencePanel trace={cachedTrace} evidence={[]} />);
-    expect(screen.getByText(/returned no grounding evidence/i)).toBeTruthy();
-    expect(screen.getByText("0 / 0 drawable")).toBeTruthy();
+    expect(screen.getByText(/no spatial evidence was produced/i)).toBeTruthy();
+    expect(screen.queryByText("0 / 0 drawable")).toBeNull();
   });
 });
 
@@ -130,5 +135,45 @@ describe("EvidencePanel: selection is shared with the imagery overlay", () => {
     // The drawable item is index 1 of the raw payload, which is what the
     // imagery overlay keys its boxes on.
     expect(onSelect).toHaveBeenCalledWith(1);
+  });
+
+  it("focuses the selected evidence without modifying its coordinates", () => {
+    const onSelect = vi.fn();
+    const onFocus = vi.fn();
+    render(<EvidencePanel trace={trace} evidence={[boxRecord("ship", [0.1, 0.2, 0.3, 0.4])]} selected={null} onSelect={onSelect} onFocus={onFocus} />);
+    fireEvent.click(screen.getByRole("button", { name: "Focus" }));
+    expect(onSelect).toHaveBeenCalledWith(0);
+    expect(onFocus).toHaveBeenCalledWith(0);
+    expect(evidenceItems()[0].textContent).toContain("xyxy [0.1000, 0.2000, 0.3000, 0.4000]");
+  });
+});
+
+
+describe("Report integrity and download resources", () => {
+  it("a hash alone stays unchecked, while successful verification remains verified", () => {
+    const { rerender } = render(<EvidencePanel trace={trace} evidence={[]} />);
+    expect(screen.getByText("Unchecked")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /view execution/i }));
+    expect(screen.getByText("Verification not performed.")).toBeTruthy();
+    rerender(<EvidencePanel trace={trace} evidence={[]} verification={{ verified: true, message: "Chain verified." }} />);
+    expect(screen.getAllByText("VERIFIED")).toHaveLength(2);
+    expect(screen.getByText("Chain verified.")).toBeTruthy();
+    expect(screen.queryByText("Verification not performed.")).toBeNull();
+  });
+
+  it.each([false, true])("releases download resources, including click failure=%s", fail => {
+    vi.useFakeTimers();
+    const revoke = vi.fn();
+    const create = vi.fn().mockReturnValue("blob:report-fixture");
+    vi.stubGlobal("URL", { createObjectURL: create, revokeObjectURL: revoke });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => { if (fail) throw new Error("Download blocked"); });
+    try {
+      const download = () => downloadPdf(new Uint8Array([1]), "fixture.pdf");
+      if (fail) expect(download).toThrow("Download blocked"); else download();
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(document.querySelector('a[download]')).toBeNull();
+      vi.runAllTimers();
+      expect(revoke).toHaveBeenCalledWith("blob:report-fixture");
+    } finally { click.mockRestore(); vi.unstubAllGlobals(); vi.useRealTimers(); }
   });
 });

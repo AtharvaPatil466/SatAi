@@ -17,14 +17,14 @@ export function ResolutionChart({ report }: { report: ResolutionReport }) {
       <div className="h-[300px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 12, right: 14, left: -16, bottom: 4 }}>
-            <CartesianGrid stroke="#20394b" strokeDasharray="3 5" vertical={false} />
-            <XAxis dataKey="label" stroke="#6f8595" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-            <YAxis domain={[0, 0.6]} stroke="#6f8595" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={(v) => `${Math.round(v * 100)}%`} />
-            <Tooltip contentStyle={{ background: "#0c1823", border: "1px solid #20394b", borderRadius: 8, fontSize: 12 }} formatter={(value) => `${(Number(value) * 100).toFixed(1)}%`} />
+            <CartesianGrid stroke="#dfe5ee" strokeDasharray="3 5" vertical={false} />
+            <XAxis dataKey="label" stroke="#56657a" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+            <YAxis domain={[0, 0.6]} stroke="#56657a" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={(v) => `${Math.round(v * 100)}%`} />
+            <Tooltip contentStyle={{ background: "#ffffff", border: "1px solid #dfe5ee", borderRadius: 8, fontSize: 12 }} formatter={(value) => `${(Number(value) * 100).toFixed(1)}%`} />
             <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
-            <Line type="monotone" dataKey="open" name="Open-question accuracy" stroke="#47d7dd" strokeWidth={3} dot={{ fill: "#071019", stroke: "#47d7dd", strokeWidth: 2, r: 4 }} activeDot={{ r: 6 }} />
-            <Line type="monotone" dataKey="aggregate" name="Aggregate accuracy" stroke="#7f93a3" strokeWidth={1.5} strokeDasharray="6 5" dot={false} />
-            {data.filter((point) => point.degenerate).map((point) => <ReferenceDot key={point.gsd} x={point.label} y={point.open} r={7} fill="#f0ad4e" stroke="#071019" strokeWidth={3} />)}
+            <Line type="monotone" dataKey="open" name="Open-question accuracy" stroke="#245bdb" strokeWidth={3} dot={{ fill: "#ffffff", stroke: "#245bdb", strokeWidth: 2, r: 4 }} activeDot={{ r: 6 }} />
+            <Line type="monotone" dataKey="aggregate" name="Aggregate accuracy" stroke="#56657a" strokeWidth={1.5} strokeDasharray="6 5" dot={false} />
+            {data.filter((point) => point.degenerate).map((point) => <ReferenceDot key={point.gsd} x={point.label} y={point.open} r={7} fill="#855400" stroke="#ffffff" strokeWidth={3} />)}
           </LineChart>
         </ResponsiveContainer>
       </div>

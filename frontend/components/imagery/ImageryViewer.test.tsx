@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ImageryViewer } from "./ImageryViewer";
 import type { EvidenceRecord } from "@/lib/types";
 
@@ -146,5 +146,36 @@ describe("ImageryViewer: grounding evidence overlay", () => {
     render(<ImageryViewer sceneId={SCENE} evidence={[boxRecord("building", [0.1, 0.2, 0.7, 0.8])]} />);
     fireEvent.error(screen.getByRole("img"));
     expect(screen.queryByTestId("evidence-overlay")).toBeNull();
+  });
+});
+
+describe("ImageryViewer: deterministic navigation", () => {
+  it("Fit always resets the transformed view", () => {
+    render(<ImageryViewer sceneId={SCENE} />);
+    loadImage(1024, 1024);
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(screen.getByTestId("imagery-transform").style.transform).toContain("scale(1.4)");
+    fireEvent.click(screen.getByRole("button", { name: "Fit image" }));
+    expect(screen.getByTestId("imagery-transform").style.transform).toBe("translate(0px, 0px) scale(1)");
+  });
+
+  it("zooms the image and evidence as one transformed layer", () => {
+    render(<ImageryViewer sceneId={SCENE} evidence={[boxRecord("building", [0.1, 0.2, 0.7, 0.8])]} />);
+    const image = loadImage(1024, 1024);
+    const layer = screen.getByTestId("imagery-transform");
+    expect(image.parentElement).toBe(layer);
+    expect(screen.getByTestId("evidence-overlay").parentElement).toBe(layer);
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(layer.style.transform).toContain("scale(1.4)");
+  });
+
+  it("focuses a selected real box without changing its reported coordinates", async () => {
+    const evidence = [boxRecord("building", [0.1, 0.2, 0.3, 0.4])];
+    const { rerender } = render(<ImageryViewer sceneId={SCENE} evidence={evidence} selected={0} />);
+    loadImage(1024, 1024);
+    const before = percentages(overlayBoxes()[0]);
+    rerender(<ImageryViewer sceneId={SCENE} evidence={evidence} selected={0} focusRequest={{ index: 0, nonce: 1 }} />);
+    await waitFor(() => expect(screen.getByTestId("imagery-transform").style.transform).toContain("scale(3)"));
+    expect(percentages(overlayBoxes()[0])).toEqual(before);
   });
 });

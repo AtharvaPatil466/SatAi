@@ -15,13 +15,11 @@ import { ChangePairViewer } from "@/components/change/ChangePairViewer";
 import { EvidencePanel } from "@/components/evidence/EvidencePanel";
 import { AnalysisResult } from "@/components/analysis/AnalysisResult";
 import { ImageryViewer } from "@/components/imagery/ImageryViewer";
-import { usePathname } from "next/navigation";
 import { AlertCircle } from "lucide-react";
 
 const MAX_QUESTION_LENGTH = 2000;
 
 export default function ChangePage() {
-  const pathname = usePathname();
   const [catalog, setCatalog] = useState<SceneCatalog | null>(null);
   const [t1, setT1] = useState<string | null>(null);
   const [t2, setT2] = useState<string | null>(null);
@@ -126,59 +124,7 @@ export default function ChangePage() {
   // Initialize catalog on mount via effect would go here, but keeping it simple
 
   return (
-    <div className="min-h-screen lg:grid lg:grid-cols-[248px_1fr]">
-      <nav>
-        <ul>
-          <li>
-            <a
-              href="/workspace"
-              className={pathname === "/workspace" ? "border-b border-border text-accent" : "text-slate-400 hover:text-slate-100"}
-            >
-              Workspace
-            </a>
-          </li>
-          <li>
-            <a
-              href="/change"
-              className={pathname === "/change" ? "border-b border-accent text-accent" : "text-slate-400 hover:text-slate-100"}
-            >
-              Change Intelligence
-            </a>
-          </li>
-          <li>
-            <a
-              href="/resolution"
-              className={pathname === "/resolution" ? "border-b border-border text-accent" : "text-slate-400 hover:text-slate-100"}
-            >
-              Resolution Lab
-            </a>
-          </li>
-          <li>
-            <a
-              href="/sar"
-              className={pathname === "/sar" ? "border-b border-border text-accent" : "text-slate-400 hover:text-slate-100"}
-            >
-              SAR Validation
-            </a>
-          </li>
-          <li>
-            <a
-              href="/executions"
-              className={pathname === "/executions" ? "border-b border-border text-accent" : "text-slate-400 hover:text-slate-100"}
-            >
-              Executions
-            </a>
-          </li>
-          <li>
-            <a
-              href="/system"
-              className={pathname === "/system" ? "border-b border-border text-accent" : "text-slate-400 hover:text-slate-100"}
-            >
-              System
-            </a>
-          </li>
-        </ul>
-      </nav>
+    <div className="min-w-0">
       <div className="min-w-0 px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
         <div className="max-w-2xl mx-auto">
           <header className="mb-6">

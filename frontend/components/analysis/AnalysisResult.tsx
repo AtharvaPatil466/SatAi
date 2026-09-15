@@ -1,15 +1,22 @@
+import { CACHED_EXPLANATION } from "@/lib/report";
+import { DatabaseZap, Radio } from "lucide-react";
+import { resultStateFromExecution, resultStateLabel } from "@/lib/result-state";
 import type { AnalysisResponse } from "@/lib/types";
-import { ExecutionBadge } from "./ExecutionBadge";
 
 export function AnalysisResult({ result }: { result: AnalysisResponse }) {
+  const state = resultStateFromExecution(result.execution_mode, result.results_artifact);
+  const live = state === "real_live";
   return (
-    <section className="rounded-xl border border-accent/25 bg-accent/[0.055] p-5 shadow-glow" aria-live="polite">
-      <div className="flex flex-wrap items-center justify-between gap-3"><p className="eyebrow">Answer</p><ExecutionBadge mode={result.execution_mode} /></div>
-      <p className="mt-5 break-words text-3xl font-bold text-white">{result.answer}</p>
-      <p className="mt-4 break-words text-sm text-slate-300">{result.model.name} · {result.model.version}</p>
-      <p className="mt-2 text-sm text-slate-300">{result.notice}</p>
-      <p className="mt-2 font-mono text-xs text-slate-400">execution_mode: {result.execution_mode}</p>
-      {result.results_artifact && <p className="mt-4 break-all border-t border-border pt-3 font-mono text-[10px] text-slate-500">{result.results_artifact}</p>}
+    <section className="result-reveal border-b border-border px-5 py-5" aria-live="polite">
+      <p className="eyebrow">Answer</p>
+      <p className="mt-3 whitespace-pre-wrap break-words text-[1.35rem] font-semibold leading-snug text-white">{result.answer}</p>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <span className={`inline-flex items-center gap-1.5 rounded border px-2 py-1 font-mono text-[9px] font-bold tracking-[0.1em] ${live ? "border-success/30 bg-success/[0.07] text-success" : state === "cached_real" ? "border-warning/30 bg-warning/[0.07] text-warning" : "border-border text-slate-400"}`}>
+          {live ? <Radio size={11} /> : <DatabaseZap size={11} />}{state === "cached_real" ? "Cached real result" : resultStateLabel(state)}
+        </span>
+        <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-slate-600">{live ? "LIVE" : state === "cached_real" ? "CACHED RESULT" : "UNAVAILABLE"}</span>
+      </div>
+      {state === "cached_real" && <p className="mt-4 text-[11px] leading-relaxed text-slate-500">{CACHED_EXPLANATION}</p>}
     </section>
   );
 }

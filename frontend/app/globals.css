@@ -2,42 +2,123 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { color-scheme: dark; }
+:root { color-scheme: light; }
 
 * { box-sizing: border-box; }
 
-html { background: #071019; }
+html { background: #fff; }
 
 body {
   margin: 0;
-  background:
-    radial-gradient(circle at 80% -10%, rgba(71, 215, 221, 0.08), transparent 28rem),
-    #071019;
-  color: #e8f1f5;
+  background: #fff;
+  color: #172b4d;
 }
 
-::selection { background: rgba(71, 215, 221, 0.28); }
+::selection { background: rgba(36, 91, 219, 0.28); }
 
 button, input, select, textarea { font: inherit; }
 
 .panel {
-  @apply rounded-xl border border-border bg-surface shadow-panel;
+  @apply rounded-md border border-border bg-surface;
 }
 
 .eyebrow {
   @apply text-[0.68rem] font-bold uppercase tracking-[0.18em] text-accent;
 }
 
-.muted { @apply text-sm leading-relaxed text-slate-400; }
+.muted { @apply text-sm leading-relaxed; color: #56657a; }
 
 .grid-overlay {
   background-image:
-    linear-gradient(rgba(71, 215, 221, 0.055) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(71, 215, 221, 0.055) 1px, transparent 1px);
+    linear-gradient(rgba(36, 91, 219, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(36, 91, 219, 0.055) 1px, transparent 1px);
   background-size: 32px 32px;
+}
+
+.instrument-grid {
+  background-image:
+    linear-gradient(rgba(36, 91, 219, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(36, 91, 219, 0.04) 1px, transparent 1px),
+    radial-gradient(circle at 50% 35%, rgba(23, 43, 57, 0.2), transparent 60%);
+  background-size: 40px 40px, 40px 40px, auto;
+}
+
+@keyframes result-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.result-reveal { animation: result-in 180ms ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .result-reveal { animation: none; }
 }
 
 .maplibregl-control-container { display: none; }
 
 .prose-annotation p { margin: 0.65rem 0; }
-.prose-annotation strong { color: #dffcff; }
+.prose-annotation strong { color: #172b4d; }
+
+/* Shared light palette for legacy component color classes, including drawers. */
+.app-shell :is([class*="bg-[#"], [class*="bg-background"]) { background-color: #fff; }
+.app-shell :is([class*="bg-raised"], .instrument-grid) { background-color: #f3f5f8; }
+.app-shell .instrument-grid { background-image: none; }
+.app-shell :is([class~="text-white"], [class~="text-slate-100"], [class~="text-slate-200"], [class~="text-slate-300"]) { color: #172b4d; }
+.app-shell :is([class~="text-slate-400"], [class~="text-slate-500"], [class~="text-slate-600"], [class~="text-slate-700"]) { color: #56657a; }
+.app-shell [class*="border-border"] { border-color: #dfe5ee; }
+.app-shell [class~="text-accent"] { color: #245bdb; }
+.app-shell [class*="bg-accent/"] { background-color: #edf3ff; }
+.app-shell [class~="bg-accent"] { background-color: #245bdb; color: #fff; }
+.app-shell [class~="text-warning"] { color: #855400; }
+.app-shell [class~="text-success"] { color: #16713d; }
+.app-shell [class~="text-error"] { color: #b42332; }
+.app-shell button:hover { border-color: #245bdb; }
+.app-shell :is(input, select, textarea) { accent-color: #245bdb; }
+.app-shell :is(input, textarea)::placeholder { color: #67758a; }
+.app-shell [class~="bg-accent"]:hover { background-color: #1d4bb8; color: #fff; }
+.app-shell aside[aria-label="Analysis"] { background: #f8fafc; }
+.app-shell aside[aria-label="Analysis"] > section { margin: 12px; border-radius: 12px; background: #f3f5f8; }
+
+/* Landing page — hide AppShell chrome, go full-bleed */
+body:has(.landing-page) { background: #fff; color: #000; }
+body:has(.landing-page) > * > .lg\:grid { display: block !important; }
+body:has(.landing-page) aside,
+body:has(.landing-page) header[class*="TopBar"],
+body:has(.landing-page) nav[class*="Sidebar"] { display: none !important; }
+body:has(.landing-page) main { max-width: none !important; padding: 0 !important; height: auto !important; overflow: visible !important; }
+body:has(.landing-page) [class*="lg:grid-cols-[216px"] { grid-template-columns: 1fr !important; }
+
+/* Hide sidebar and topbar when on landing page */
+body:has(.landing-page) div[class*="min-h-screen"] > aside { display: none !important; }
+body:has(.landing-page) div[class*="min-h-screen"] { display: block !important; }
+body:has(.landing-page) div[class*="lg:h-screen"] > header { display: none !important; }
+body:has(.landing-page) div[class*="lg:h-screen"] > main {
+  max-width: none !important;
+  padding: 0 !important;
+  height: auto !important;
+  overflow: visible !important;
+  margin: 0 !important;
+}
+body:has(.landing-page) div[class*="lg:h-screen"] {
+  height: auto !important;
+  overflow: visible !important;
+}
+
+/* Landing page link underline animation */
+.link-underline-landing {
+  position: relative;
+}
+.link-underline-landing::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 0;
+  height: 1px;
+  background: currentColor;
+  transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.link-underline-landing:hover::after { width: 100%; }
+
+/* Smooth scroll for landing */
+html:has(.landing-page) { scroll-behavior: smooth; }

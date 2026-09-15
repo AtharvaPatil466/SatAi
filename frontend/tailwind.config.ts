@@ -5,14 +5,14 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: "#071019",
-        surface: "#0c1823",
-        raised: "#122433",
-        border: "#20394b",
-        accent: "#47d7dd",
-        success: "#55d68a",
-        warning: "#f0ad4e",
-        error: "#ff6b75",
+        background: "#ffffff",
+        surface: "#f3f5f8",
+        raised: "#edf1f6",
+        border: "#dfe5ee",
+        accent: "#245bdb",
+        success: "#16713d",
+        warning: "#855400",
+        error: "#b42332",
       },
       boxShadow: {
         panel: "0 18px 50px rgba(0, 0, 0, 0.22)",

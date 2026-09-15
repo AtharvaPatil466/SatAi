@@ -1,106 +1,66 @@
 "use client";
 
+import { useRef, useState } from "react";
+import { createReportPayload, downloadPdf, generatePdf, reportFilename, type ReportContext } from "@/lib/report";
+import { resultStateFromExecution } from "@/lib/result-state";
+import { Crosshair } from "lucide-react";
 import { boxStyle, formatConfidence, parseEvidence } from "@/lib/evidence";
-import type { EvidenceRecord, TraceRecord } from "@/lib/types";
-import { formatTimestamp } from "@/lib/utils";
-import { IntegrityBadge } from "./IntegrityBadge";
+import type { AnalysisResponse, EvidenceRecord, TraceRecord, TraceVerification } from "@/lib/types";
 import { TraceDrawer } from "./TraceDrawer";
 
-/** Visual grounding evidence and execution provenance are different claims:
- *  one is what the model saw, the other is how the run is accounted for.
- *  Both stay visible. `evidence` is optional so execution history, which has
- *  traces but no analysis payload, renders provenance alone. */
-export function EvidencePanel({ trace, evidence, selected, onSelect }: {
+export function EvidencePanel({ trace, evidence, selected, onSelect, onFocus, onVerify, verification, verifying, verificationError, report }: {
+  report?: { result: AnalysisResponse; context: ReportContext };
   trace: TraceRecord;
   evidence?: EvidenceRecord[] | null;
   selected?: number | null;
   onSelect?: (index: number | null) => void;
+  onFocus?: (index: number) => void;
+  onVerify?: () => void;
+  verification?: TraceVerification | null;
+  verifying?: boolean;
+  verificationError?: string | null;
 }) {
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const exportPending = useRef(false);
+  const canExport = !!report && !!report.result.answer.trim() && !!report.context.sceneId && !!report.context.question.trim() && resultStateFromExecution(report.result.execution_mode, report.result.results_artifact) !== "unverified";
+  async function exportReport() {
+    if (!canExport || !report || exportPending.current) return;
+    exportPending.current = true; setExporting(true); setExportError(null);
+    try {
+      const payload = createReportPayload(report.result, report.context);
+      const bytes = await generatePdf(payload);
+      downloadPdf(bytes, reportFilename(payload.sceneId, payload.generatedAt));
+    } catch (reason) {
+      setExportError(reason instanceof Error ? reason.message : "Report export failed. Please retry.");
+    } finally { exportPending.current = false; setExporting(false); }
+  }
   const showGrounding = evidence !== undefined;
-  return (
-    <section className="panel p-5">
-      {showGrounding && <GroundingEvidence evidence={evidence} selected={selected ?? null} onSelect={onSelect} />}
-      <div className="mb-4 flex items-center justify-between"><p className="eyebrow">Execution provenance</p><IntegrityBadge /></div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Evidence label="Identity" value={trace.params.scene_id ?? "Not recorded"} mono />
-        <Evidence label="Model" value={trace.model_name} />
-        <Evidence label="Model version" value={trace.model_version} />
-        <Evidence label="Execution mode" value={trace.params.execution_mode} />
-        <Evidence label="Capability" value={trace.params.capability ?? "Not recorded"} />
-        <Evidence label="Planner version" value={trace.params.planner_version ?? "Not recorded"} />
-        <Evidence label="Planner rule" value={trace.params.planner_rule ?? "Not recorded"} />
-        <Evidence label="Question" value={trace.input_summary.question} />
-        <Evidence label="Record hash" value={trace.record_hash} mono detail={formatTimestamp(trace.timestamp_iso)} />
-        <Evidence label="Previous hash" value={trace.prev_hash || "Genesis (empty previous hash)"} mono />
-      </div>
-      <div className="mt-4"><TraceDrawer trace={trace} /></div>
-    </section>
-  );
-}
-
-function GroundingEvidence({ evidence, selected, onSelect }: {
-  evidence: EvidenceRecord[] | null | undefined;
-  selected: number | null;
-  onSelect?: (index: number | null) => void;
-}) {
   const { boxes, unsupported, total } = parseEvidence(evidence);
-  return (
-    <div className="mb-5 border-b border-border pb-5">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <p className="eyebrow">Visual evidence</p>
-        <span className="font-mono text-[10px] text-slate-500">{boxes.length} / {total} drawable</span>
-      </div>
-      {boxes.length === 0 && unsupported.length === 0 && (
-        <p className="text-xs text-slate-400">
-          {total === 0
-            ? "This capability returned no grounding evidence. The answer stands on the execution record below."
-            : "No drawable grounding evidence was returned."}
-        </p>
-      )}
-      {boxes.length > 0 && <ul data-testid="grounding-evidence-list" className="space-y-2">
-        {boxes.map((box) => {
-          const active = selected === box.index;
-          const confidence = formatConfidence(box.confidence);
-          const style = boxStyle(box);
-          return (
-            <li key={box.index}>
-              <button
-                type="button"
-                aria-pressed={active}
-                onClick={() => onSelect?.(active ? null : box.index)}
-                className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition ${active ? "border-accent bg-accent/10" : "border-border bg-raised/45 hover:border-accent/45"}`}
-              >
-                <span className={`mt-0.5 grid size-5 shrink-0 place-items-center rounded border font-mono text-[10px] ${active ? "border-accent bg-accent text-background" : "border-border text-slate-400"}`}>{box.index + 1}</span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="break-words text-sm font-semibold text-slate-100">{box.label}</span>
-                    <span className="font-mono text-[11px] text-accent">{confidence ? `confidence ${confidence}` : "confidence not reported"}</span>
-                  </span>
-                  <span className="mt-1 block break-all font-mono text-[10px] leading-4 text-slate-500">
-                    xyxy [{box.x1.toFixed(4)}, {box.y1.toFixed(4)}, {box.x2.toFixed(4)}, {box.y2.toFixed(4)}] · normalized_xyxy
-                  </span>
-                  <span className="mt-1 block font-mono text-[10px] text-slate-500">
-                    extent {style.width} × {style.height} of scene{box.sourceSceneId ? ` · ${box.sourceSceneId}` : ""}
-                  </span>
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>}
-      {unsupported.length > 0 && (
-        <ul className="mt-2 space-y-1">
-          {unsupported.map((item) => (
-            <li key={item.index} role="note" className="rounded border border-warning/30 bg-warning/5 p-2 text-[11px] text-warning">
-              Item {item.index + 1} (type <span className="font-mono">{item.type}</span>) is not rendered: {item.reason}
-            </li>
-          ))}
-        </ul>
-      )}
+  return <section className="result-reveal px-5 py-5">
+    {showGrounding && <div>
+      <div className="mb-3 flex items-center justify-between"><p className="eyebrow">Evidence</p>{total > 0 && <span className="font-mono text-[9px] text-slate-500">{boxes.length} / {total} drawable</span>}</div>
+      {boxes.length === 0 && unsupported.length === 0 && <p className="text-xs leading-relaxed text-slate-400">No spatial evidence was produced for this analysis.</p>}
+      {boxes.length > 0 && <ul data-testid="grounding-evidence-list" className="space-y-2">{boxes.map(box => {
+        const active = selected === box.index;
+        const confidence = formatConfidence(box.confidence);
+        const style = boxStyle(box);
+        return <li key={box.index} className={`rounded border p-3 transition-colors ${active ? "border-accent bg-accent/[0.07]" : "border-border bg-raised/30"}`}>
+          <button type="button" aria-pressed={active} onClick={() => onSelect?.(active ? null : box.index)} className="w-full text-left">
+            <span className="flex items-start justify-between gap-2"><strong className="break-words text-xs text-slate-100">{box.label}</strong>{confidence && <span className="shrink-0 font-mono text-[9px] text-accent">{confidence}</span>}</span>
+            <span className="mt-1.5 block font-mono text-[9px] text-slate-500">xyxy [{box.x1.toFixed(4)}, {box.y1.toFixed(4)}, {box.x2.toFixed(4)}, {box.y2.toFixed(4)}] · normalized_xyxy</span>
+            {confidence && <span className="sr-only">confidence {confidence}</span>}
+          </button>
+          {onFocus && <button type="button" onClick={() => { onSelect?.(box.index); onFocus(box.index); }} className="mt-2 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.1em] text-accent hover:text-white"><Crosshair size={11} /> Focus</button>}
+          <span className="sr-only">extent {style.width} × {style.height} of scene{box.sourceSceneId ? ` · ${box.sourceSceneId}` : ""}</span>
+        </li>;
+      })}</ul>}
+      {unsupported.length > 0 && <ul className="mt-2 space-y-1">{unsupported.map(item => <li key={item.index} role="note" className="rounded border border-warning/30 bg-warning/5 p-2 text-[10px] text-warning">Item {item.index + 1} (type <span className="font-mono">{item.type}</span>) is not rendered: {item.reason}</li>)}</ul>}
+    </div>}
+    {!showGrounding && <div className="mb-3"><p className="eyebrow">Execution provenance</p><p className="mt-2 break-words text-xs text-slate-400">{trace.model_name} · {trace.params.capability ?? "Not reported"} · {trace.record_hash}</p></div>}
+    <div className={`${showGrounding ? "mt-5 border-t border-border pt-4" : ""} flex items-stretch gap-2`}><TraceDrawer artifact={report?.result.results_artifact} trace={trace} onVerify={onVerify} verification={verification} verifying={verifying} verificationError={verificationError} />
+      {report && <button type="button" disabled={!canExport || exporting} onClick={exportReport} className="shrink-0 rounded border border-border bg-raised/35 px-3 py-2.5 text-xs font-semibold text-slate-200 disabled:opacity-50">{exporting ? "Generating…" : "Download report"}</button>}
     </div>
-  );
-}
-
-function Evidence({ label, value, detail, mono = false }: { label: string; value: string; detail?: string; mono?: boolean }) {
-  return <div className="rounded-lg border border-border bg-raised/45 p-3"><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">{label}</p><p className={`mt-2 break-words text-xs leading-5 text-slate-200 ${mono ? "font-mono" : ""}`}>{value}</p>{detail && <p className="mt-1 text-[10px] text-slate-500">{detail}</p>}</div>;
+    {exportError && <p role="alert" className="mt-2 text-xs text-error">{exportError}</p>}
+  </section>;
 }
