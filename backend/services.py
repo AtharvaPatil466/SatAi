@@ -1,5 +1,6 @@
 """Read-only artifact adapters and the thin live/cached inference boundary."""
 
+import hashlib
 import json
 import os
 import re
@@ -13,7 +14,12 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import numpy as np
 from PIL import Image, UnidentifiedImageError
+from rasterio import Affine
+from rasterio.enums import ColorInterp, Resampling
+from rasterio.errors import NotGeoreferencedWarning, RasterioIOError
+from rasterio.io import MemoryFile
 
 from backend.scene_pack import (
     ScenePackError,
@@ -22,6 +28,8 @@ from backend.scene_pack import (
     resolution_assets,
     scene_asset,
 )
+from data.dataset import SCENE_MANIFEST_VERSION, SceneManifest, validate_scene_manifest
+from data.pairing import evaluate_compatibility
 
 # Keep model resolution offline before importing the model registry.
 os.environ["HF_HUB_OFFLINE"] = "1"
@@ -29,6 +37,8 @@ os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
 from orchestrator.capabilities import (  # noqa: E402
     CapabilityUnavailable,
+    CHANGE_VQA,
+    OPTICAL_SAR,
     SINGLE_IMAGE_VQA,
     UnknownCapability,
 )
@@ -104,7 +114,12 @@ GOLDEN_SCENE_ID = "loveda_LoveDA_images_png_0_gsd0.3"
 GOLDEN_QUESTION = "Is there a building in this image?"
 GOLDEN_CAPABILITY = SINGLE_IMAGE_VQA
 INGESTED_SCENE_DIR = ROOT / "data" / "runtime" / "scenes"
+INGESTED_RASTER_DIR = ROOT / "data" / "runtime" / "rasters"
+SCENE_MANIFEST_DIR = ROOT / "data" / "runtime" / "manifests"
 INGESTED_SCENE_ID = re.compile(r"scene_[0-9a-f]{32}")
+MAX_RASTER_PIXELS = 100_000_000
+MAX_RASTER_BANDS = 32
+MAX_PREVIEW_DIMENSION = 2048
 MODEL_EXECUTION_TIMEOUT_SECONDS = 120.0
 
 
@@ -122,6 +137,14 @@ class InvalidImageUpload(ValueError):
 
 class SceneStorageError(RuntimeError):
     """Raised when a validated scene cannot be stored."""
+
+
+class PairCompatibilityError(ValueError):
+    """Raised before dispatch when a requested scene pair is ineligible."""
+
+    def __init__(self, result: dict[str, Any]) -> None:
+        super().__init__("Scene pair is not compatible with the requested workflow.")
+        self.result = result
 
 
 class ModelUnavailable(RuntimeError):
@@ -198,58 +221,311 @@ def local_scene_image(scene_id: str) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-def ingest_scene(data: bytes, filename: str) -> dict[str, Any]:
-    if not data:
-        raise InvalidImageUpload("The uploaded image is empty.")
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _json_number(value: object) -> int | float | None:
+    if value is None:
+        return None
+    number = float(value)
+    return number if np.isfinite(number) else None
+
+
+def _preview_channel(channel: np.ma.MaskedArray) -> np.ndarray:
+    values = np.ma.asarray(channel, dtype=np.float64).filled(np.nan)
+    valid = np.isfinite(values)
+    if not valid.any():
+        return np.zeros(values.shape, dtype=np.uint8)
+    low, high = np.percentile(values[valid], (2, 98))
+    if high <= low:
+        return np.zeros(values.shape, dtype=np.uint8)
+    scaled = np.clip((values - low) * (255.0 / (high - low)), 0, 255)
+    scaled[~valid] = 0
+    return scaled.astype(np.uint8)
+
+
+def _tiff_preview_and_metadata(data: bytes) -> tuple[Image.Image, dict[str, Any]]:
     try:
         with warnings.catch_warnings():
-            warnings.simplefilter("error", Image.DecompressionBombWarning)
-            with Image.open(BytesIO(data)) as source:
-                detected_format = source.format
-                if detected_format not in {"PNG", "JPEG"}:
-                    raise InvalidImageUpload("Only PNG and JPEG images are supported.")
-                source.verify()
-            with Image.open(BytesIO(data)) as source:
-                source.load()
-                width, height = source.size
-                if source.mode in {"L", "LA", "RGB", "RGBA"}:
-                    canonical = source.copy()
+            warnings.simplefilter("ignore", NotGeoreferencedWarning)
+            with MemoryFile(data) as memory, memory.open() as source:
+                if source.driver != "GTiff":
+                    raise InvalidImageUpload("The uploaded raster is not a supported TIFF.")
+                if source.width < 1 or source.height < 1 or source.count < 1:
+                    raise InvalidImageUpload("The uploaded TIFF has invalid dimensions or bands.")
+                if (
+                    source.width * source.height > MAX_RASTER_PIXELS
+                    or source.count > MAX_RASTER_BANDS
+                ):
+                    raise InvalidImageUpload("The uploaded TIFF exceeds raster safety limits.")
+                if any(
+                    np.dtype(dtype).kind not in {"u", "i", "f"}
+                    for dtype in source.dtypes
+                ):
+                    raise InvalidImageUpload("The uploaded TIFF has an unsupported data type.")
+
+                color = list(source.colorinterp)
+                rgb = (ColorInterp.red, ColorInterp.green, ColorInterp.blue)
+                if all(item in color for item in rgb):
+                    bands = [color.index(item) + 1 for item in rgb]
+                elif source.count >= 3:
+                    bands = [1, 2, 3]
                 else:
-                    mode = "RGBA" if "transparency" in source.info else "RGB"
-                    canonical = source.convert(mode)
+                    bands = [1]
+                scale = min(1.0, MAX_PREVIEW_DIMENSION / max(source.width, source.height))
+                preview_width = max(1, round(source.width * scale))
+                preview_height = max(1, round(source.height * scale))
+                pixels = source.read(
+                    bands,
+                    out_shape=(len(bands), preview_height, preview_width),
+                    masked=True,
+                    resampling=Resampling.nearest,
+                )
+                rendered = [_preview_channel(pixels[index]) for index in range(len(bands))]
+                if len(rendered) == 1:
+                    rendered *= 3
+                preview = Image.fromarray(np.stack(rendered, axis=-1), mode="RGB")
+
+                gcps, gcp_crs = source.gcps
+                rpcs = source.rpcs
+                transform = source.transform
+                crs = source.crs or gcp_crs
+                if rpcs:
+                    georeferencing_status = "rpc"
+                elif gcps:
+                    georeferencing_status = "gcps"
+                elif crs is None:
+                    georeferencing_status = "missing_crs"
+                elif transform == Affine.identity():
+                    georeferencing_status = "missing_transform"
+                else:
+                    georeferencing_status = "affine"
+                metadata = {
+                    "driver": source.driver,
+                    "width": source.width,
+                    "height": source.height,
+                    "band_count": source.count,
+                    "dtypes": list(source.dtypes),
+                    "crs_wkt": crs.to_wkt() if crs else None,
+                    "crs_epsg": crs.to_epsg() if crs else None,
+                    "transform": [
+                        float(value)
+                        for value in (
+                            transform.a,
+                            transform.b,
+                            transform.c,
+                            transform.d,
+                            transform.e,
+                            transform.f,
+                        )
+                    ],
+                    "bounds": [float(value) for value in source.bounds],
+                    "resolution": [float(abs(value)) for value in source.res],
+                    "nodata": [_json_number(value) for value in source.nodatavals],
+                    "georeferencing_status": georeferencing_status,
+                    "pairing_ready": georeferencing_status == "affine",
+                    "gcp_count": len(gcps),
+                    "has_rpc": bool(rpcs),
+                    "color_interpretation": [item.name for item in color],
+                    "preview_bands": bands,
+                }
+                return preview, metadata
     except InvalidImageUpload:
         raise
-    except (
-        Image.DecompressionBombError,
-        Image.DecompressionBombWarning,
-        UnidentifiedImageError,
-        OSError,
-        SyntaxError,
-        ValueError,
-    ) as exc:
-        raise InvalidImageUpload("The uploaded file is not a safe, valid image.") from exc
+    except (RasterioIOError, OSError, ValueError, TypeError) as exc:
+        raise InvalidImageUpload("The uploaded file is not a safe, valid TIFF.") from exc
 
+
+def _safe_filename(filename: str) -> str:
+    return Path(filename.replace("\\", "/")).name or "upload"
+
+
+def _declared_metadata(values: dict[str, str | None] | None) -> dict[str, Any]:
+    declared: dict[str, Any] = {}
+    values = values or {}
+    modality = (values.get("modality") or "").strip().lower()
+    if modality:
+        if modality not in {"optical", "multispectral", "sar", "unknown"}:
+            raise InvalidImageUpload("Unsupported declared modality.")
+        declared["modality"] = modality
+    for field in ("sensor", "pair_group", "benchmark_source"):
+        value = (values.get(field) or "").strip()
+        if value:
+            if len(value) > 256:
+                raise InvalidImageUpload(f"Declared {field} is too long.")
+            declared[field] = value
+    timestamp = (values.get("acquisition_timestamp") or "").strip()
+    if timestamp:
+        try:
+            parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise InvalidImageUpload("Acquisition timestamp must be valid ISO 8601.") from exc
+        if parsed.tzinfo is None:
+            raise InvalidImageUpload("Acquisition timestamp must include a timezone.")
+        declared["acquisition_timestamp"] = parsed.isoformat()
+    polarization = (values.get("polarization") or "").strip()
+    if polarization:
+        items = [item.strip().upper() for item in polarization.split(",") if item.strip()]
+        if not items or any(not re.fullmatch(r"[A-Z0-9_-]{1,16}", item) for item in items):
+            raise InvalidImageUpload("Declared polarization is malformed.")
+        declared["polarizations"] = list(dict.fromkeys(items))
+    return declared
+
+
+def ingest_scene(
+    data: bytes,
+    filename: str,
+    metadata: dict[str, str | None] | None = None,
+) -> dict[str, Any]:
+    if not data:
+        raise InvalidImageUpload("The uploaded image is empty.")
+    declared = _declared_metadata(metadata)
+    raster: dict[str, Any] | None = None
+    is_tiff = data[:4] in {b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+"}
+    if is_tiff:
+        canonical, raster = _tiff_preview_and_metadata(data)
+        detected_format = "TIFF"
+        width, height = raster["width"], raster["height"]
+    else:
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", Image.DecompressionBombWarning)
+                with Image.open(BytesIO(data)) as source:
+                    detected_format = source.format
+                    if detected_format not in {"PNG", "JPEG"}:
+                        raise InvalidImageUpload(
+                            "Only PNG, JPEG, and TIFF images are supported."
+                        )
+                    source.verify()
+                with Image.open(BytesIO(data)) as source:
+                    source.load()
+                    width, height = source.size
+                    if source.mode in {"L", "LA", "RGB", "RGBA"}:
+                        canonical = source.copy()
+                    else:
+                        mode = "RGBA" if "transparency" in source.info else "RGB"
+                        canonical = source.convert(mode)
+        except InvalidImageUpload:
+            raise
+        except (
+            Image.DecompressionBombError,
+            Image.DecompressionBombWarning,
+            UnidentifiedImageError,
+            OSError,
+            SyntaxError,
+            ValueError,
+        ) as exc:
+            raise InvalidImageUpload("The uploaded file is not a safe, valid image.") from exc
+
+    safe_filename = _safe_filename(filename)
     scene_id = f"scene_{uuid4().hex}"
     target = INGESTED_SCENE_DIR / f"{scene_id}.png"
-    temporary = INGESTED_SCENE_DIR / f".{scene_id}.tmp"
+    native_target = INGESTED_RASTER_DIR / f"{scene_id}.tif" if is_tiff else None
+    manifest_target = SCENE_MANIFEST_DIR / f"{scene_id}.json"
+    temporary = target.with_name(f".{scene_id}.png.tmp")
+    native_temporary = native_target.with_name(f".{scene_id}.tif.tmp") if native_target else None
+    manifest_temporary = manifest_target.with_name(f".{scene_id}.json.tmp")
+    committed: list[Path] = []
     try:
         INGESTED_SCENE_DIR.mkdir(parents=True, exist_ok=True)
+        SCENE_MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
+        if native_target:
+            INGESTED_RASTER_DIR.mkdir(parents=True, exist_ok=True)
+            assert native_temporary is not None
+            native_temporary.write_bytes(data)
         canonical.save(temporary, format="PNG")
+        try:
+            known_scene = identify_scene(temporary)
+        except ScenePackError:
+            known_scene = None
+        source_metadata = known_scene.get("source", {}) if known_scene else {}
+        provenance = {
+            field: "user_declared_upload"
+            for field in declared
+        }
+        if "sensor" not in declared and source_metadata.get("sensor") is not None:
+            provenance["sensor"] = "committed_scene_pack"
+        if (
+            "acquisition_timestamp" not in declared
+            and source_metadata.get("acquisition_date") is not None
+        ):
+            provenance["acquisition_timestamp"] = "committed_scene_pack"
+        manifest: SceneManifest = {
+            "version": SCENE_MANIFEST_VERSION,
+            "scene_id": scene_id,
+            "source": {
+                "filename": safe_filename,
+                "format": detected_format,
+                "sha256": _sha256_bytes(data),
+                "native_path": (
+                    f"data/runtime/rasters/{scene_id}.tif" if native_target else None
+                ),
+            },
+            "preview": {
+                "path": f"data/runtime/scenes/{scene_id}.png",
+                "sha256": _sha256_file(temporary),
+                "width": canonical.width,
+                "height": canonical.height,
+                "derivation": (
+                    "2nd-98th percentile display stretch"
+                    if is_tiff
+                    else "canonical PNG"
+                ),
+            },
+            "raster": raster,
+            "identity": {
+                "sensor": declared.get("sensor", source_metadata.get("sensor")),
+                "modality": declared.get("modality", "unknown"),
+                "acquisition_id": None,
+                "acquisition_time": declared.get(
+                    "acquisition_timestamp", source_metadata.get("acquisition_date")
+                ),
+                "polarizations": declared.get("polarizations", []),
+                "benchmark_source": declared.get("benchmark_source"),
+                "provenance": provenance,
+            },
+            "grouping": {
+                "geographic_group": None,
+                "pair_group": declared.get("pair_group"),
+                "paired_scene_ids": [],
+                "original_split": source_metadata.get("dataset_split"),
+                "label_source": None,
+            },
+        }
+        validate_scene_manifest(manifest)
+        manifest_temporary.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        if native_target and native_temporary:
+            native_temporary.replace(native_target)
+            committed.append(native_target)
         temporary.replace(target)
-    except OSError as exc:
+        committed.append(target)
+        manifest_temporary.replace(manifest_target)
+        committed.append(manifest_target)
+    except (OSError, ValueError) as exc:
+        for path in committed:
+            path.unlink(missing_ok=True)
         raise SceneStorageError("The uploaded image could not be stored.") from exc
     finally:
         canonical.close()
-        try:
-            temporary.unlink(missing_ok=True)
-        except OSError:
-            pass
+        for path in (temporary, native_temporary, manifest_temporary):
+            if path is not None:
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
-    safe_filename = Path(filename.replace("\\", "/")).name or "upload"
-    try:
-        known_scene = identify_scene(target)
-    except ScenePackError:
-        known_scene = None
     source = known_scene.get("source", {}) if known_scene else {}
     return {
         "scene_id": scene_id,
@@ -257,10 +533,12 @@ def ingest_scene(data: bytes, filename: str) -> dict[str, Any]:
         "format": detected_format,
         "width": width,
         "height": height,
-        "sensor": source.get("sensor"),
+        "sensor": declared.get("sensor", source.get("sensor")),
         "gsd": str(source["gsd"]) if source.get("gsd") is not None else None,
         "location": source.get("location"),
-        "acquisition_date": source.get("acquisition_date"),
+        "acquisition_date": declared.get(
+            "acquisition_timestamp", source.get("acquisition_date")
+        ),
     }
 
 
@@ -399,6 +677,53 @@ def _curated_cached_response(
     }
 
 
+def _manifest_for_scene(scene_id: str) -> tuple[SceneManifest | None, str | None]:
+    if not INGESTED_SCENE_ID.fullmatch(scene_id):
+        return None, "scene_manifest_missing"
+    path = SCENE_MANIFEST_DIR / f"{scene_id}.json"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return validate_scene_manifest(value), None
+    except FileNotFoundError:
+        return None, "scene_manifest_missing"
+    except (OSError, json.JSONDecodeError, ValueError, TypeError):
+        return None, "scene_manifest_invalid"
+
+
+def scene_compatibility(scene_id: str, scene_id_2: str, workflow: str) -> dict[str, Any]:
+    manifests: list[SceneManifest] = []
+    failed: list[dict[str, str]] = []
+    unknown: list[str] = []
+    for index, scene in enumerate((scene_id, scene_id_2), 1):
+        manifest, error = _manifest_for_scene(scene)
+        if manifest is None:
+            code = error or "scene_manifest_invalid"
+            failed.append(
+                {
+                    "code": code,
+                    "message": f"Scene {index} has no valid runtime manifest.",
+                }
+            )
+            unknown.append(f"scene_{index}.manifest")
+        else:
+            manifests.append(manifest)
+    if failed:
+        return {
+            "eligible": False,
+            "requested_workflow": workflow,
+            "verified_checks": [],
+            "failed_checks": failed,
+            "warnings": [],
+            "unknown_metadata": unknown,
+            "normalized_overlap_ratio": None,
+            "resolution_ratio": None,
+            "acquisition_interval_seconds": None,
+            "operations_required": [],
+            "reason_codes": list(dict.fromkeys(item["code"] for item in failed)),
+        }
+    return evaluate_compatibility(manifests[0], manifests[1], workflow)
+
+
 def analyze_scene(
     scene_id: str,
     question: str,
@@ -422,6 +747,13 @@ def analyze_scene(
         if "second_scene" in plan.missing_inputs:
             raise AnalysisUnavailable("This request requires two scenes.")
         raise AnalysisUnavailable("This request requires a scene.")
+    if plan.selected_capability in {OPTICAL_SAR, CHANGE_VQA}:
+        assert scene_id_2 is not None
+        compatibility = scene_compatibility(
+            scene_id, scene_id_2, plan.selected_capability
+        )
+        if not compatibility["eligible"]:
+            raise PairCompatibilityError(compatibility)
     if not plan.executable:
         raise CapabilityUnavailable(
             plan.unavailable_reason or "The selected capability cannot be executed."
