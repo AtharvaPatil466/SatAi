@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 import time
@@ -7,8 +8,11 @@ from threading import Event
 from types import SimpleNamespace
 
 import pytest
+import numpy as np
 from fastapi.testclient import TestClient
 from PIL import Image
+from rasterio.io import MemoryFile
+from rasterio.transform import from_origin
 
 import backend.services as services
 import orchestrator.trace as trace_store
@@ -25,6 +29,8 @@ def isolated_trace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     trace_store._LOADED_PATH = None
     monkeypatch.setattr(trace_store, "TRACE_PATH", tmp_path / "trace.jsonl")
     monkeypatch.setattr(services, "INGESTED_SCENE_DIR", tmp_path / "scenes")
+    monkeypatch.setattr(services, "INGESTED_RASTER_DIR", tmp_path / "rasters")
+    monkeypatch.setattr(services, "SCENE_MANIFEST_DIR", tmp_path / "manifests")
     yield
     trace_store._TRACE.clear()
     trace_store._LOADED_PATH = None
@@ -41,10 +47,43 @@ def image_bytes(format_name: str, size: tuple[int, int] = (4, 3)) -> bytes:
     return output.getvalue()
 
 
-def upload(client: TestClient, filename: str, data: bytes) -> object:
+def tiff_bytes(
+    *,
+    georeferenced: bool = True,
+    bands: int = 2,
+    size: tuple[int, int] = (6, 4),
+    dtype: str = "uint16",
+) -> bytes:
+    width, height = size
+    profile: dict[str, object] = {
+        "driver": "GTiff",
+        "width": width,
+        "height": height,
+        "count": bands,
+        "dtype": dtype,
+        "nodata": 0,
+    }
+    if georeferenced:
+        profile.update(crs="EPSG:32643", transform=from_origin(500000, 2000000, 10, 10))
+    with MemoryFile() as memory:
+        with memory.open(**profile) as dataset:
+            for band in range(1, bands + 1):
+                values = np.arange(width * height).reshape(height, width) + band
+                dataset.write(values.astype(dtype), band)
+        return memory.read()
+
+
+def upload(
+    client: TestClient,
+    filename: str,
+    data: bytes,
+    metadata: dict[str, str] | None = None,
+    content_type: str = "application/octet-stream",
+) -> object:
     return client.post(
         "/api/scenes",
-        files={"file": (filename, data, "application/octet-stream")},
+        files={"file": (filename, data, content_type)},
+        data=metadata or {},
     )
 
 
@@ -194,6 +233,12 @@ def test_png_upload_returns_factual_metadata(client: TestClient) -> None:
         "location": None,
         "acquisition_date": None,
     }
+    manifest = json.loads(
+        (services.SCENE_MANIFEST_DIR / f"{payload['scene_id']}.json").read_text()
+    )
+    assert manifest["source"]["native_path"] is None
+    assert manifest["source"]["format"] == "PNG"
+    assert manifest["raster"] is None
 
 
 def test_jpeg_upload_is_served_as_canonical_png(client: TestClient) -> None:
@@ -208,6 +253,254 @@ def test_jpeg_upload_is_served_as_canonical_png(client: TestClient) -> None:
     with Image.open(BytesIO(retrieved.content)) as image:
         assert image.format == "PNG"
         assert image.size == (4, 3)
+
+
+def test_geotiff_content_is_preserved_and_manifested_regardless_of_name(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(services, "MAX_PREVIEW_DIMENSION", 3)
+    original = tiff_bytes()
+    response = upload(client, "renamed.bin", original)
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["format"] == "TIFF"
+    assert payload["filename"] == "renamed.bin"
+    scene_id = payload["scene_id"]
+    native = services.INGESTED_RASTER_DIR / f"{scene_id}.tif"
+    preview = services.INGESTED_SCENE_DIR / f"{scene_id}.png"
+    manifest_path = services.SCENE_MANIFEST_DIR / f"{scene_id}.json"
+    assert native.read_bytes() == original
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["version"] == "1.0"
+    assert manifest["source"] == {
+        "filename": "renamed.bin",
+        "format": "TIFF",
+        "native_path": f"data/runtime/rasters/{scene_id}.tif",
+        "sha256": hashlib.sha256(original).hexdigest(),
+    }
+    raster = manifest["raster"]
+    assert raster["crs_epsg"] == 32643
+    assert raster["transform"] == [10.0, 0.0, 500000.0, 0.0, -10.0, 2000000.0]
+    assert raster["bounds"] == [500000.0, 1999960.0, 500060.0, 2000000.0]
+    assert raster["resolution"] == [10.0, 10.0]
+    assert raster["band_count"] == 2
+    assert raster["dtypes"] == ["uint16", "uint16"]
+    assert raster["nodata"] == [0.0, 0.0]
+    assert raster["georeferencing_status"] == "affine"
+    assert raster["pairing_ready"] is True
+    assert manifest["preview"]["width"] == 3
+    assert manifest["preview"]["height"] == 2
+    assert preview.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    served = client.get(f"/api/scenes/{scene_id}/image")
+    assert served.status_code == 200
+    assert served.content == preview.read_bytes()
+    assert served.content != original
+
+
+def test_plain_tiff_records_missing_georeferencing(client: TestClient) -> None:
+    response = upload(client, "plain.tiff", tiff_bytes(georeferenced=False, bands=1))
+
+    assert response.status_code == 201
+    scene_id = response.json()["scene_id"]
+    manifest = json.loads(
+        (services.SCENE_MANIFEST_DIR / f"{scene_id}.json").read_text(encoding="utf-8")
+    )
+    raster = manifest["raster"]
+    assert raster["crs_wkt"] is None
+    assert raster["crs_epsg"] is None
+    assert raster["georeferencing_status"] == "missing_crs"
+    assert raster["pairing_ready"] is False
+
+
+def test_tiff_safety_limit_rejects_without_residue(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(services, "MAX_RASTER_PIXELS", 10)
+
+    response = upload(client, "large.tif", tiff_bytes(size=(6, 4)))
+
+    assert response.status_code == 422
+    assert not services.INGESTED_SCENE_DIR.exists()
+    assert not services.INGESTED_RASTER_DIR.exists()
+    assert not services.SCENE_MANIFEST_DIR.exists()
+
+
+def test_tiff_band_limit_rejects_without_residue(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(services, "MAX_RASTER_BANDS", 1)
+
+    response = upload(client, "too-many-bands.tif", tiff_bytes(bands=2))
+
+    assert response.status_code == 422
+    assert not services.INGESTED_SCENE_DIR.exists()
+
+
+def test_tiff_unsupported_complex_content_is_rejected(client: TestClient) -> None:
+    response = upload(client, "complex.tif", tiff_bytes(bands=1, dtype="complex64"))
+
+    assert response.status_code == 422
+    assert not services.INGESTED_SCENE_DIR.exists()
+
+
+def test_malformed_tiff_signature_is_rejected_without_residue(client: TestClient) -> None:
+    response = upload(client, "not-really.png", b"II*\x00broken")
+
+    assert response.status_code == 422
+    assert not services.INGESTED_SCENE_DIR.exists()
+    assert not services.INGESTED_RASTER_DIR.exists()
+    assert not services.SCENE_MANIFEST_DIR.exists()
+
+
+def test_spoofed_filename_and_mime_do_not_override_tiff_content(
+    client: TestClient,
+) -> None:
+    response = upload(
+        client,
+        "looks-optical.jpg",
+        tiff_bytes(),
+        {"modality": "sar", "polarization": "VV"},
+        "image/jpeg",
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["format"] == "TIFF"
+    manifest = json.loads(
+        (services.SCENE_MANIFEST_DIR / f"{payload['scene_id']}.json").read_text()
+    )
+    assert manifest["identity"]["modality"] == "sar"
+    assert manifest["identity"]["polarizations"] == ["VV"]
+
+
+@pytest.mark.parametrize(("format_name", "filename"), [("PNG", "benchmark.tif"), ("JPEG", "benchmark.bin")])
+def test_png_jpeg_accept_declared_benchmark_provenance(
+    client: TestClient, format_name: str, filename: str
+) -> None:
+    response = upload(
+        client,
+        filename,
+        image_bytes(format_name),
+        {
+            "modality": "multispectral",
+            "sensor": "Sentinel-2 MSI",
+            "acquisition_timestamp": "2026-01-02T03:04:05Z",
+            "pair_group": "pilot-pair-7",
+            "benchmark_source": "audited-pilot",
+        },
+        "image/tiff",
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["format"] == format_name
+    assert payload["sensor"] == "Sentinel-2 MSI"
+    assert payload["acquisition_date"] == "2026-01-02T03:04:05+00:00"
+    manifest = json.loads(
+        (services.SCENE_MANIFEST_DIR / f"{payload['scene_id']}.json").read_text()
+    )
+    assert manifest["identity"]["benchmark_source"] == "audited-pilot"
+    assert manifest["identity"]["provenance"]["benchmark_source"] == "user_declared_upload"
+    assert manifest["grouping"]["pair_group"] == "pilot-pair-7"
+    assert manifest["raster"] is None
+
+
+@pytest.mark.parametrize(
+    ("metadata", "message"),
+    [
+        ({"modality": "thermal"}, "Unsupported declared modality."),
+        (
+            {"acquisition_timestamp": "2026-01-02T03:04:05"},
+            "Acquisition timestamp must include a timezone.",
+        ),
+    ],
+)
+def test_invalid_declared_metadata_is_rejected(
+    client: TestClient, metadata: dict[str, str], message: str
+) -> None:
+    response = upload(client, "scene.png", image_bytes("PNG"), metadata)
+    assert response.status_code == 422
+    assert response.json() == {"detail": message}
+    assert not services.INGESTED_SCENE_DIR.exists()
+
+
+def test_incompatible_pair_returns_structured_result_without_model_dispatch(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    common = {
+        "modality": "optical",
+        "sensor": "test-optical",
+        "acquisition_timestamp": "2026-01-01T00:00:00Z",
+        "pair_group": "pair-1",
+    }
+    first = upload(client, "one.tif", tiff_bytes(), common).json()["scene_id"]
+    second = upload(client, "two.tif", tiff_bytes(), common).json()["scene_id"]
+    monkeypatch.setattr(
+        services,
+        "route",
+        lambda **_: (_ for _ in ()).throw(AssertionError("model must not run")),
+    )
+
+    response = client.post(
+        "/api/analyze",
+        json={
+            "scene_id": first,
+            "scene_id_2": second,
+            "question": "Compare optical and SAR.",
+            "capability": "optical_sar",
+        },
+    )
+
+    assert response.status_code == 422
+    compatibility = response.json()["detail"]
+    assert compatibility["eligible"] is False
+    assert compatibility["requested_workflow"] == "optical_sar"
+    assert "modalities_incompatible" in compatibility["reason_codes"]
+    assert trace_store.records() == []
+
+
+def test_compatible_pair_reaches_existing_unavailable_provider_boundary(
+    client: TestClient,
+) -> None:
+    optical = upload(
+        client,
+        "optical.tif",
+        tiff_bytes(),
+        {
+            "modality": "multispectral",
+            "sensor": "test-optical",
+            "acquisition_timestamp": "2026-01-01T00:00:00Z",
+            "pair_group": "pair-1",
+        },
+    ).json()["scene_id"]
+    sar = upload(
+        client,
+        "sar.tif",
+        tiff_bytes(),
+        {
+            "modality": "sar",
+            "sensor": "test-sar",
+            "acquisition_timestamp": "2026-01-02T00:00:00Z",
+            "polarization": "VV,VH",
+            "pair_group": "pair-1",
+        },
+    ).json()["scene_id"]
+
+    response = client.post(
+        "/api/analyze",
+        json={
+            "scene_id": optical,
+            "scene_id_2": sar,
+            "question": "Compare optical and SAR.",
+            "capability": "optical_sar",
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Required capability is not currently available."}
+    assert trace_store.records() == []
 
 
 def test_scene_id_is_not_derived_from_malicious_filename(client: TestClient) -> None:
@@ -380,6 +673,22 @@ def test_failed_storage_leaves_no_scene(
     assert response.json() == {"detail": "The uploaded image could not be stored."}
     assert "private storage failure" not in response.text
     assert list(services.INGESTED_SCENE_DIR.iterdir()) == []
+    assert list(services.SCENE_MANIFEST_DIR.iterdir()) == []
+
+
+def test_failed_tiff_manifest_leaves_no_native_or_preview(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_manifest(_: object) -> None:
+        raise ValueError("invalid manifest")
+
+    monkeypatch.setattr(services, "validate_scene_manifest", fail_manifest)
+    response = upload(client, "scene.tif", tiff_bytes())
+
+    assert response.status_code == 500
+    assert list(services.INGESTED_SCENE_DIR.iterdir()) == []
+    assert list(services.INGESTED_RASTER_DIR.iterdir()) == []
+    assert list(services.SCENE_MANIFEST_DIR.iterdir()) == []
 
 
 def test_valid_model_output_returns_answer_and_one_trace(

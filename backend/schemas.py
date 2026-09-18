@@ -28,7 +28,7 @@ class AnalyzeRequest(BaseModel):
 class SceneUploadResponse(BaseModel):
     scene_id: str
     filename: str
-    format: Literal["PNG", "JPEG"]
+    format: Literal["PNG", "JPEG", "TIFF"]
     width: int
     height: int
     sensor: str | None = None
