@@ -3,6 +3,7 @@ pyyaml
 numpy
 torch
 pillow
+pyarrow>=17,<23
 rasterio
 scipy
 matplotlib

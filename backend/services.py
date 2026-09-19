@@ -65,8 +65,29 @@ ROOT = Path(__file__).resolve().parents[1]
 MODEL_NAME = "qwen2.5vl-3b"
 RESULTS_RELATIVE_PATH = "results/qwen2.5vl-3b__ladder__rescored__20260904.json"
 RESULTS_PATH = ROOT / RESULTS_RELATIVE_PATH
+PREPARED_VQA_RESULTS_RELATIVE_PATH = (
+    "results/qwen2.5vl-3b__prepared-vqa__loveda-0.json"
+)
+PREPARED_VQA_RESULTS_PATH = ROOT / PREPARED_VQA_RESULTS_RELATIVE_PATH
+GOLDEN_ASSET_RELATIVE_PATH = (
+    "data/ladder/0.3/loveda_Train_Rural_images_png_0_gsd0.3.png"
+)
 SAR_ANNOTATION_PATH = ROOT / "data" / "sar_gate" / "annotation_template.md"
 SAR_RENDER_DIR = ROOT / "data" / "sar_gate" / "rendered"
+SENSOR_NECESSITY_SCENES_PATH = ROOT / "data" / "manifests" / "cdse" / "scenes.v1.json"
+SENSOR_NECESSITY_RESULTS_PATH = (
+    ROOT / "data" / "manifests" / "cdse" / "sensor-necessity-results.v1.json"
+)
+SENSOR_NECESSITY_EXTERNAL_DIRS = {
+    "cdse-yangtze-jiangsu-20200523": ROOT / "data" / "external" / "satquery-s1-s2-20200523",
+    "cdse-rotterdam-port-20200530": ROOT / "data" / "external" / "satquery-replication-rotterdam-20200530",
+}
+SENSOR_NECESSITY_RENDER_FILES = {
+    "optical": "optical.png",
+    "sar": "sar.png",
+    "correct-fusion": "correct-fusion.png",
+    "mismatched-sar": "mismatched-sar.png",
+}
 # Scene provenance is limited to facts recorded in committed artifacts
 # (data/sar_gate/annotation_template.md, data/sar_gate/order_scenes.py).
 # Scenes without recorded provenance report UNKNOWN/None rather than values
@@ -163,6 +184,68 @@ def load_results() -> dict[str, Any]:
         raise ArtifactError(f"Required resolution artifact is unavailable: {exc}") from exc
 
 
+@lru_cache(maxsize=1)
+def load_prepared_vqa_results() -> dict[str, Any]:
+    try:
+        report = json.loads(PREPARED_VQA_RESULTS_PATH.read_text(encoding="utf-8"))
+        scene = report["scene"]
+        model = report["model"]
+        decoding = report["decoding"]
+        runtime = report["runtime"]
+        rows = report["results"]
+        if (
+            report["schema_version"] != "prepared-vqa-measurement.v1"
+            or not isinstance(report["run_id"], str)
+            or not isinstance(report["timestamp"], str)
+            or not re.fullmatch(r"[0-9a-f]{40}", report["git_revision"])
+            or scene["scene_id"] != GOLDEN_SCENE_ID
+            or scene["asset_path"] != GOLDEN_ASSET_RELATIVE_PATH
+            or model.get("name") != MODEL_NAME
+            or model.get("identity") != "Qwen/Qwen2.5-VL-3B-Instruct"
+            or decoding.get("do_sample") is not False
+            or runtime.get("gpu_count", 0) < 1
+            or len(runtime.get("gpus", [])) != runtime["gpu_count"]
+            or len(rows) != 10
+        ):
+            raise ValueError
+        keys = []
+        for row in rows:
+            prediction = row.get("prediction")
+            if (
+                set(row) != {"tile_id", "image_paths", "question", "prediction"}
+                or row["tile_id"] != GOLDEN_SCENE_ID
+                or row["image_paths"] != [GOLDEN_ASSET_RELATIVE_PATH]
+                or not isinstance(row["question"], str)
+                or not row["question"]
+                or not isinstance(prediction, dict)
+                or set(prediction) != {"answer"}
+                or not isinstance(prediction["answer"], str)
+                or not prediction["answer"].strip()
+            ):
+                raise ValueError
+            keys.append((row["tile_id"], row["question"]))
+        if len(set(keys)) != len(keys):
+            raise ValueError
+        asset = ROOT / GOLDEN_ASSET_RELATIVE_PATH
+        if not asset.is_file() or _sha256_file(asset) != scene["asset_sha256"]:
+            raise ValueError
+        with Image.open(asset) as image:
+            pixel_hash = hashlib.sha256(image.convert("RGB").tobytes()).hexdigest()
+        if pixel_hash != scene["pixel_sha256"]:
+            raise ValueError
+    except (
+        AttributeError,
+        json.JSONDecodeError,
+        KeyError,
+        OSError,
+        TypeError,
+        UnidentifiedImageError,
+        ValueError,
+    ) as exc:
+        raise ArtifactError("Prepared VQA measurement artifact is unavailable or malformed.") from exc
+    return report
+
+
 def normalize_scene_id(scene_id: str) -> str:
     path = Path(scene_id)
     value = str(path.with_suffix("")) if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".tif", ".tiff"} else scene_id
@@ -185,19 +268,32 @@ def is_golden_eligible_plan(execution: ExecutionPlan) -> bool:
 def find_cached_result(
     scene_id: str, question: str, capability: str
 ) -> dict[str, Any] | None:
-    if capability != GOLDEN_CAPABILITY:
+    if capability != GOLDEN_CAPABILITY or scene_id != GOLDEN_SCENE_ID:
         return None
-    if scene_id != GOLDEN_SCENE_ID or question != GOLDEN_QUESTION:
-        return None
-    return next(
+    matches = []
+    for report, artifact_path, model_version in (
+        (load_results(), RESULTS_RELATIVE_PATH, get(MODEL_NAME).version),
         (
-            row
-            for row in load_results().get("results", [])
-            if row.get("tile_id") == GOLDEN_SCENE_ID
-            and row.get("question") == GOLDEN_QUESTION
+            load_prepared_vqa_results(),
+            PREPARED_VQA_RESULTS_RELATIVE_PATH,
+            "Qwen/Qwen2.5-VL-3B-Instruct",
         ),
-        None,
-    )
+    ):
+        matches.extend(
+            {
+                **row,
+                "_results_artifact": artifact_path,
+                "_model_name": MODEL_NAME,
+                "_model_version": model_version,
+            }
+            for row in report.get("results", [])
+            if isinstance(row, dict)
+            and row.get("tile_id") == scene_id
+            and row.get("question") == question
+        )
+    if len(matches) > 1:
+        raise ArtifactError("The committed cached result is ambiguous.")
+    return matches[0] if matches else None
 
 
 def local_scene_image(scene_id: str) -> Path | None:
@@ -547,21 +643,29 @@ def _cached_response(
 ) -> dict[str, Any]:
     prediction = cached.get("prediction")
     answer = prediction.get("answer") if isinstance(prediction, dict) else None
-    if not isinstance(answer, str) or not answer.strip():
+    artifact_path = cached.get("_results_artifact")
+    model_name = cached.get("_model_name")
+    model_version = cached.get("_model_version")
+    if (
+        not isinstance(answer, str)
+        or not answer.strip()
+        or not isinstance(artifact_path, str)
+        or not isinstance(model_name, str)
+        or not isinstance(model_version, str)
+    ):
         raise ArtifactError("The committed cached result is invalid.")
-    model = get(MODEL_NAME)
     try:
         trace = append_record(
             {
-                "model_name": MODEL_NAME,
-                "model_version": model.version,
+                "model_name": model_name,
+                "model_version": model_version,
                 "params": {
                     "capability": GOLDEN_CAPABILITY,
                     "planner_version": plan.planner_version,
                     "planner_rule": plan.rule_id,
                     "requested_capability": plan.requested_capability,
                     "execution_mode": "cached_result",
-                    "results_artifact": RESULTS_RELATIVE_PATH,
+                    "results_artifact": artifact_path,
                     "scene_id": cached["tile_id"],
                     "sensor": sensor,
                 },
@@ -578,10 +682,10 @@ def _cached_response(
     return {
         "answer": answer.strip(),
         "execution_mode": "cached_result",
-        "results_artifact": RESULTS_RELATIVE_PATH,
-        "model": {"name": MODEL_NAME, "version": model.version},
+        "results_artifact": artifact_path,
+        "model": {"name": model_name, "version": model_version},
         "trace": trace,
-        "notice": f"Live inference unavailable ({reason}); showing the exact committed result for this scene and question.",
+        "notice": f"Cached real measured result ({reason}); showing the exact committed result for this scene and question. No live inference ran.",
     }
 
 
@@ -758,11 +862,14 @@ def analyze_scene(
         raise CapabilityUnavailable(
             plan.unavailable_reason or "The selected capability cannot be executed."
         )
-    cached = (
-        find_cached_result(scene_id, question, plan.selected_capability)
-        if is_golden_eligible_plan(execution)
-        else None
-    )
+    cached = None
+    if scene_id == GOLDEN_SCENE_ID and is_golden_eligible_plan(execution):
+        cached = find_cached_result(scene_id, question, plan.selected_capability)
+        if cached is None:
+            raise AnalysisUnavailable(
+                "No exact measured result matches this prepared scene and question. No answer was generated."
+            )
+        return _cached_response(cached, sensor, "exact measured artifact match", plan)
     image_path = local_scene_image(scene_id)
     if image_path is None:
         if cached is None:
@@ -965,4 +1072,97 @@ def sar_annotation(scene: str) -> dict[str, Any]:
 def sar_render_path(scene: str) -> Path | None:
     key = SAR_SCENE_ALIASES.get(_slug(scene), _slug(scene))
     candidate = SAR_RENDER_DIR / f"{key.replace('-', '_')}.png"
+    return candidate if candidate.is_file() else None
+
+
+def _sensor_necessity_manifests() -> tuple[dict[str, Any], dict[str, Any]]:
+    try:
+        scenes = json.loads(SENSOR_NECESSITY_SCENES_PATH.read_text(encoding="utf-8"))
+        results = json.loads(SENSOR_NECESSITY_RESULTS_PATH.read_text(encoding="utf-8"))
+        scene_rows = scenes["scenes"]
+        experiments = results["experiments"]
+        locked_rule = results["locked_rule"]
+        if scenes["scene_count"] != 2 or len(scene_rows) != 2 or len(experiments) != 2:
+            raise ValueError
+        scene_ids = {row["scene_id"] for row in scene_rows}
+        if scene_ids != {row["scene_id"] for row in experiments}:
+            raise ValueError
+        if scene_ids != set(SENSOR_NECESSITY_EXTERNAL_DIRS):
+            raise ValueError
+        if any(row["applied_rule"] != locked_rule for row in experiments):
+            raise ValueError
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise ArtifactError("Frozen Sensor Necessity manifests are unavailable or malformed.") from exc
+    return scenes, results
+
+
+def sensor_necessity_report() -> dict[str, Any]:
+    scenes, results = _sensor_necessity_manifests()
+    experiments = {row["scene_id"]: row for row in results["experiments"]}
+    summaries = []
+    for scene in scenes["scenes"]:
+        scene_id = scene["scene_id"]
+        experiment = experiments[scene_id]
+        renders = {
+            name: {
+                "url": f"/api/sar/sensor-necessity/{scene_id}/render/{name}",
+                "available": (SENSOR_NECESSITY_EXTERNAL_DIRS[scene_id] / filename).is_file(),
+            }
+            for name, filename in SENSOR_NECESSITY_RENDER_FILES.items()
+        }
+        summaries.append(
+            {
+                "scene_id": scene_id,
+                "geographic_description": scene["geographic_description"],
+                "bbox": scene["bbox"],
+                "s1": {
+                    "product_id": scene["s1"]["selected_product_id"],
+                    "timestamp": scene["s1"]["timestamp"],
+                    "polarization": scene["s1"]["polarization"],
+                    "orbit_direction": scene["s1"]["orbit_direction"],
+                    "relative_orbit": scene["s1"]["relative_orbit"],
+                    "processing": scene["s1"]["processing"],
+                },
+                "s2": {
+                    "product_id": scene["s2"]["selected_product_id"],
+                    "timestamp": scene["s2"]["timestamp"],
+                    "cloud_cover_percent": scene["s2"]["cloud_cover_percent"],
+                },
+                "temporal_separation_seconds": scene["temporal_separation_seconds"],
+                "grid": scene["output_grid"],
+                "correct_support_pixels": experiment["correct_support_pixels"],
+                "mismatched_support_pixels": experiment["mismatched_support_pixels"],
+                "correct_to_mismatched_support_ratio": experiment[
+                    "correct_to_mismatched_support_ratio"
+                ],
+                "support_reduction_percent_when_mismatched": experiment[
+                    "support_reduction_percent_when_mismatched"
+                ],
+                "support_overlap": experiment["support_overlap"],
+                "boundary_overlap": experiment["boundary_overlap"],
+                "retuned": experiment["retuned"],
+                "renders": renders,
+            }
+        )
+    return {
+        "benchmark": "Frozen Sensor Necessity",
+        "status": "frozen",
+        "classification": "deterministic proxy; not model performance",
+        "disclaimer": results["statement"],
+        "locked_rule": results["locked_rule"],
+        "scenes": summaries,
+    }
+
+
+def sensor_necessity_render_path(scene_id: str, render_name: str) -> Path | None:
+    scenes, _ = _sensor_necessity_manifests()
+    known_scenes = {scene["scene_id"] for scene in scenes["scenes"]}
+    if scene_id not in known_scenes or scene_id not in SENSOR_NECESSITY_EXTERNAL_DIRS:
+        raise ValueError("Unknown frozen Sensor Necessity scene.")
+    if render_name not in SENSOR_NECESSITY_RENDER_FILES:
+        raise ValueError("Unknown frozen Sensor Necessity render.")
+    candidate = (
+        SENSOR_NECESSITY_EXTERNAL_DIRS[scene_id]
+        / SENSOR_NECESSITY_RENDER_FILES[render_name]
+    )
     return candidate if candidate.is_file() else None

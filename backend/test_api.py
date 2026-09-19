@@ -25,6 +25,7 @@ from orchestrator import router as model_router
 
 @pytest.fixture(autouse=True)
 def isolated_trace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    services.load_prepared_vqa_results.cache_clear()
     trace_store._TRACE.clear()
     trace_store._LOADED_PATH = None
     monkeypatch.setattr(trace_store, "TRACE_PATH", tmp_path / "trace.jsonl")
@@ -32,6 +33,7 @@ def isolated_trace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(services, "INGESTED_RASTER_DIR", tmp_path / "rasters")
     monkeypatch.setattr(services, "SCENE_MANIFEST_DIR", tmp_path / "manifests")
     yield
+    services.load_prepared_vqa_results.cache_clear()
     trace_store._TRACE.clear()
     trace_store._LOADED_PATH = None
 
@@ -109,11 +111,202 @@ def test_sar_returns_human_labeled_annotation(client: TestClient) -> None:
     assert set(payload["summaries"]) == {"water", "built_up", "vegetation", "terrain"}
 
 
-def test_golden_analysis_falls_back_to_exact_cache(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    def no_gpu(**_: object) -> dict:
-        raise RuntimeError("Qwen2.5-VL inference requires a CUDA GPU")
+@pytest.mark.parametrize(
+    ("question", "answer", "evaluated_correct"),
+    [
+        (services.GOLDEN_QUESTION, "Yes", True),
+        ("What is the dominant land cover in this image?", "Forest", False),
+    ],
+)
+def test_prepared_measured_vqa_replays_exact_cache_without_live_inference(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    question: str,
+    answer: str,
+    evaluated_correct: bool,
+) -> None:
+    monkeypatch.setattr(
+        services,
+        "route",
+        lambda **_: pytest.fail("prepared measured VQA must not invoke live inference"),
+    )
+    response = client.post(
+        "/api/analyze",
+        json={
+            "scene_id": services.GOLDEN_SCENE_ID,
+            "question": question,
+            "sensor": "LoveDA",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["answer"] == answer
+    assert payload["execution_mode"] == "cached_result"
+    assert payload["results_artifact"] == services.RESULTS_RELATIVE_PATH
+    assert payload["model"]["name"] == services.MODEL_NAME
+    assert payload["trace"]["input_summary"]["question"] == question
+    assert payload["trace"]["params"]["results_artifact"] == services.RESULTS_RELATIVE_PATH
+    assert payload["trace"]["params"]["planner_version"] == "phase0-rules-v1"
+    assert payload["trace"]["params"]["planner_rule"] == "default_single_image_vqa"
+    assert "confidence" not in payload
+    assert "evidence" not in payload
+    assert "correct" not in payload
+    assert "ground truth" not in payload["notice"].lower()
+    source_rows = [
+        row
+        for row in services.load_results()["results"]
+        if row.get("tile_id") == services.GOLDEN_SCENE_ID
+        and row.get("question") == question
+    ]
+    assert len(source_rows) == 1
+    assert source_rows[0]["correct"] is evaluated_correct
+    history = client.get("/api/traces").json()
+    assert history["count"] == 1
+    assert history["records"][0]["input_summary"]["question"] == question
+    assert client.post("/api/traces/verify").json() == {
+        "verified": True,
+        "message": "Chain verified (1 records)",
+    }
 
-    monkeypatch.setattr(services, "route", no_gpu)
+
+PREPARED_VQA_CASES = (
+    ("Are there agricultural fields in this image?", "Yes"),
+    ("Is there vegetation in this image?", "Yes"),
+    ("Are there roads visible in this image?", "Yes"),
+    ("Are there multiple buildings visible in this image?", "No"),
+    ("Is there a large body of water visible in this image?", "No"),
+    ("What are the main features visible in this satellite image?", "Fields, trees, houses"),
+    ("Describe the land cover visible in this image.", "3"),
+    ("Is this area densely built up?", "No"),
+    ("What type of area is shown in this satellite image?", "Agriculture"),
+    ("Describe this satellite image in one sentence.", "Agricultural fields and forested areas."),
+)
+
+
+@pytest.mark.parametrize(("question", "answer"), PREPARED_VQA_CASES)
+def test_prepared_vqa_artifact_replays_every_exact_measured_answer(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    question: str,
+    answer: str,
+) -> None:
+    monkeypatch.setattr(
+        services,
+        "route",
+        lambda **_: pytest.fail("prepared measured VQA must not invoke live inference"),
+    )
+    response = client.post(
+        "/api/analyze",
+        json={
+            "scene_id": services.GOLDEN_SCENE_ID,
+            "question": question,
+            "sensor": "LoveDA",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["answer"] == answer
+    assert payload["execution_mode"] == "cached_result"
+    assert payload["results_artifact"] == services.PREPARED_VQA_RESULTS_RELATIVE_PATH
+    assert payload["model"] == {
+        "name": "qwen2.5vl-3b",
+        "version": "Qwen/Qwen2.5-VL-3B-Instruct",
+    }
+    assert "cached real measured result" in payload["notice"].lower()
+    assert "confidence" not in payload
+    assert "evidence" not in payload
+    trace = client.get("/api/traces").json()
+    assert trace["count"] == 1
+    assert trace["records"][0]["input_summary"]["question"] == question
+    assert trace["records"][0]["params"]["results_artifact"] == (
+        services.PREPARED_VQA_RESULTS_RELATIVE_PATH
+    )
+
+
+def test_prepared_vqa_strips_only_surrounding_whitespace(client: TestClient) -> None:
+    question, answer = PREPARED_VQA_CASES[0]
+    response = client.post(
+        "/api/analyze",
+        json={
+            "scene_id": services.GOLDEN_SCENE_ID,
+            "question": f"  {question}\n",
+            "sensor": "LoveDA",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["answer"] == answer
+    assert response.json()["trace"]["input_summary"]["question"] == question
+
+
+def test_prepared_vqa_artifact_provenance_is_valid() -> None:
+    report = services.load_prepared_vqa_results()
+    assert report["schema_version"] == "prepared-vqa-measurement.v1"
+    assert report["git_revision"] == "fe9a56d76d75170a062dd93ec436c82ebc6c01cc"
+    assert report["scene"]["scene_id"] == services.GOLDEN_SCENE_ID
+    assert report["scene"]["asset_sha256"] == (
+        "495a8e889c686611f5324cb1c03ecf2b22cedc424c868fc13a8666e2fc5ab0e0"
+    )
+    assert report["scene"]["pixel_sha256"] == (
+        "d45e01abf260141843f1adb8dbaf8a0f13e9b52b797a2b6780822f7569385d26"
+    )
+    assert report["runtime"]["gpus"] == ["Tesla T4", "Tesla T4"]
+    assert len(report["results"]) == len(PREPARED_VQA_CASES) == 10
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Invent an answer",
+        "are there agricultural fields in this image?",
+        "Are there agricultural fields in this image",
+    ],
+)
+def test_prepared_unmeasured_vqa_fails_closed_without_live_inference(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, question: str
+) -> None:
+    live_called = False
+
+    def available_live_model(**_: object) -> dict:
+        nonlocal live_called
+        live_called = True
+        return {"answer": "fabricated live answer"}
+
+    monkeypatch.setattr(
+        services,
+        "route",
+        available_live_model,
+    )
+    response = client.post(
+        "/api/analyze",
+        json={
+            "scene_id": services.GOLDEN_SCENE_ID,
+            "question": question,
+            "sensor": "LoveDA",
+        },
+    )
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "No exact measured result matches this prepared scene and question. No answer was generated."
+    }
+    assert live_called is False
+    assert client.get("/api/traces").json()["count"] == 0
+
+
+def test_duplicate_prepared_vqa_rows_fail_closed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    row = next(
+        row
+        for row in services.load_results()["results"]
+        if row.get("tile_id") == services.GOLDEN_SCENE_ID
+        and row.get("question") == services.GOLDEN_QUESTION
+    )
+    monkeypatch.setattr(services, "load_results", lambda: {"results": [row, dict(row)]})
+    monkeypatch.setattr(
+        services,
+        "route",
+        lambda **_: pytest.fail("ambiguous prepared VQA must not invoke live inference"),
+    )
     response = client.post(
         "/api/analyze",
         json={
@@ -122,44 +315,65 @@ def test_golden_analysis_falls_back_to_exact_cache(client: TestClient, monkeypat
             "sensor": "LoveDA",
         },
     )
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["answer"] == "Yes"
-    assert payload["execution_mode"] == "cached_result"
-    assert payload["trace"]["params"]["results_artifact"] == services.RESULTS_RELATIVE_PATH
-    assert payload["trace"]["params"]["planner_version"] == "phase0-rules-v1"
-    assert payload["trace"]["params"]["planner_rule"] == "default_single_image_vqa"
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Required analysis artifacts are temporarily unavailable."
+    }
+    assert client.get("/api/traces").json()["count"] == 0
 
 
-def test_unmatched_query_never_fabricates(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cross_artifact_duplicate_prepared_vqa_row_fails_closed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    row = services.load_prepared_vqa_results()["results"][0]
+    monkeypatch.setattr(services, "load_results", lambda: {"results": [row]})
     monkeypatch.setattr(
         services,
         "route",
-        lambda **_: (_ for _ in ()).throw(
-            RuntimeError("CUDA GPU unavailable at /private/model secret-token")
-        ),
+        lambda **_: pytest.fail("ambiguous prepared VQA must not invoke live inference"),
     )
     response = client.post(
         "/api/analyze",
-        json={"scene_id": services.GOLDEN_SCENE_ID, "question": "Invent an answer", "sensor": "LoveDA"},
+        json={
+            "scene_id": services.GOLDEN_SCENE_ID,
+            "question": row["question"],
+            "sensor": "LoveDA",
+        },
     )
     assert response.status_code == 503
-    assert response.json() == {"detail": "Live model inference is unavailable."}
-    assert "/private/model" not in response.text
-    assert "secret-token" not in response.text
-    assert "showing the exact committed result" not in response.text
+    assert client.get("/api/traces").json()["count"] == 0
 
 
-def test_trace_history_and_verification(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(services, "route", lambda **_: (_ for _ in ()).throw(RuntimeError("no GPU")))
-    client.post(
-        "/api/analyze",
-        json={"scene_id": services.GOLDEN_SCENE_ID, "question": services.GOLDEN_QUESTION, "sensor": "LoveDA"},
+@pytest.mark.parametrize("contents", [None, "{}"])
+def test_missing_or_malformed_prepared_vqa_artifact_fails_closed(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    contents: str | None,
+) -> None:
+    artifact_path = tmp_path / "prepared-vqa.json"
+    if contents is not None:
+        artifact_path.write_text(contents, encoding="utf-8")
+    monkeypatch.setattr(services, "PREPARED_VQA_RESULTS_PATH", artifact_path)
+    services.load_prepared_vqa_results.cache_clear()
+    monkeypatch.setattr(
+        services,
+        "route",
+        lambda **_: pytest.fail("invalid prepared artifact must not invoke live inference"),
     )
-    history = client.get("/api/traces").json()
-    assert history["count"] == 1
-    verification = client.post("/api/traces/verify").json()
-    assert verification == {"verified": True, "message": "Chain verified (1 records)"}
+    response = client.post(
+        "/api/analyze",
+        json={
+            "scene_id": services.GOLDEN_SCENE_ID,
+            "question": PREPARED_VQA_CASES[0][0],
+            "sensor": "LoveDA",
+        },
+    )
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Required analysis artifacts are temporarily unavailable."
+    }
+    assert client.get("/api/traces").json()["count"] == 0
 
 
 @pytest.mark.parametrize("endpoint", [("get", "/api/traces"), ("post", "/api/traces/verify")])

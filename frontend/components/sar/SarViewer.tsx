@@ -1,42 +1,65 @@
 "use client";
 
 import { useState } from "react";
-import { sarImageUrl } from "@/lib/api";
+import { sensorNecessityRenderUrl } from "@/lib/api";
 
 type ViewerState = "LOADING" | "SUCCESS" | "UNAVAILABLE";
 
-export function SarViewer({ scene, available }: { scene: string; available: boolean }) {
+export function SarViewer({ title, detail, render, control = false }: {
+  title: string;
+  detail: string;
+  render: { url: string; available: boolean };
+  control?: boolean;
+}) {
   const [state, setState] = useState<ViewerState>("LOADING");
 
-  if (!available) {
+  if (!render.available) {
     return (
-      <figure className="panel relative grid min-h-[420px] place-items-center overflow-hidden bg-[#090c16] p-8 text-center">
-        <div role="status" className="max-w-md">
-          <p className="text-sm font-semibold text-slate-200">Processed SAR render is not committed to this checkout.</p>
-          <p className="mt-2 text-xs leading-relaxed text-slate-400">The human interpretation beside this panel is real; the scene pixels are not available here, so no substitute imagery is displayed. The render can be regenerated from the committed pipeline in data/sar_gate/process_scenes.py.</p>
+      <figure className={`panel overflow-hidden ${control ? "border-warning/50" : ""}`}>
+        <PanelHeader title={title} detail={detail} control={control} />
+        <div className="grid aspect-[4/3] place-items-center bg-[#090c16] p-8 text-center">
+          <div role="status" className="max-w-sm text-sm text-slate-300">
+            This frozen render is unavailable. No placeholder or substitute scientific imagery is shown.
+          </div>
         </div>
       </figure>
     );
   }
 
   return (
-    <figure className="panel relative min-h-[420px] overflow-hidden bg-[#090c16]">
-      <img
-        src={sarImageUrl(scene)}
-        alt={`Processed Sentinel-1 RTC false-color render: ${scene}`}
-        onLoad={() => setState("SUCCESS")}
-        onError={() => setState("UNAVAILABLE")}
-        className={`absolute inset-0 size-full object-contain ${state === "SUCCESS" ? "" : "invisible"}`}
-      />
-      {state !== "SUCCESS" && (
-        <div role="status" className="absolute inset-0 grid place-items-center p-8 text-center text-sm text-slate-300">
-          {state === "LOADING" ? "Loading processed SAR render…" : "Processed SAR render unavailable. No substitute imagery is shown."}
-        </div>
-      )}
-      <div className="pointer-events-none absolute inset-0 grid-overlay opacity-20" />
-      <figcaption className="absolute bottom-3 left-3 rounded-md border border-border bg-background/85 px-3 py-2 text-xs font-semibold backdrop-blur">
-        Sentinel-1 · RTC gamma-0 false color (R=VV, G=VH, B=VV-VH)
-      </figcaption>
+    <figure className={`panel overflow-hidden ${control ? "border-warning/50" : ""}`}>
+      <PanelHeader title={title} detail={detail} control={control} />
+      <div className="relative aspect-[4/3] bg-[#090c16]">
+        <img
+          src={sensorNecessityRenderUrl(render.url)}
+          alt={`${title}: frozen real Sentinel-1/Sentinel-2 experiment render`}
+          onLoad={() => setState("SUCCESS")}
+          onError={() => setState("UNAVAILABLE")}
+          className={`absolute inset-0 size-full object-contain ${state === "SUCCESS" ? "" : "invisible"}`}
+        />
+        {state !== "SUCCESS" && (
+          <div role="status" className="absolute inset-0 grid place-items-center p-8 text-center text-sm text-slate-300">
+            {state === "LOADING" ? "Loading frozen render…" : "Frozen render unavailable. No substitute imagery is shown."}
+          </div>
+        )}
+        <div className="pointer-events-none absolute inset-0 grid-overlay opacity-20" />
+      </div>
     </figure>
+  );
+}
+
+function PanelHeader({ title, detail, control }: { title: string; detail: string; control: boolean }) {
+  return (
+    <figcaption className="flex min-h-20 items-start justify-between gap-3 border-b border-border bg-raised/40 p-4">
+      <div>
+        <p className="text-xs font-black tracking-[0.13em] text-white">{title}</p>
+        <p className="mt-1 text-[11px] leading-4 text-slate-400">{detail}</p>
+      </div>
+      {control && (
+        <span className="shrink-0 rounded-full border border-warning/40 bg-warning/10 px-2 py-1 text-[9px] font-black tracking-wider text-warning">
+          NEGATIVE CONTROL
+        </span>
+      )}
+    </figcaption>
   );
 }

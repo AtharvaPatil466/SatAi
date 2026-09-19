@@ -1,74 +1,31 @@
-import { useEffect, useState } from "react";
-import { getCapabilities } from "@/lib/api";
-import type { CapabilityStatus } from "@/lib/types";
+import type { SensorNecessityReport, SensorNecessityScene } from "@/lib/types";
 
-const ROWS = [
-  {
-    state: "REAL" as const,
-    title: "Sentinel-1 acquisitions & RTC processing",
-    detail: "Sentinel-1 IW GRD scenes ordered via ASF + HyP3 and rendered by the committed pipeline in data/sar_gate/process_scenes.py. Renders must be regenerated in this checkout to display pixels.",
-  },
-  {
-    state: "CACHED REAL" as const,
-    title: "Human analyst interpretation",
-    detail: "Written by a human from the rendered scenes, committed verbatim in data/sar_gate/annotation_template.md — including confidence levels and uncertainty notes.",
-  },
-  {
-    state: "PROTOTYPE" as const,
-    title: "Optical–SAR fusion",
-    detail: "The optical_sar capability has no registered provider and cannot execute. No fused product exists anywhere in this repository, and none is simulated here.",
-  },
-];
-
-/** Tracks the live /api/capabilities snapshot so the prototype claim is
- *  verified against the backend rather than asserted statically. */
-export function SarFusionStatus() {
-  const [opticalSar, setOpticalSar] = useState<CapabilityStatus | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    getCapabilities()
-      .then((data) => {
-        if (!cancelled) setOpticalSar(data.capabilities.find((c) => c.name === "optical_sar") ?? null);
-      })
-      .catch(() => {
-        /* Status panel stays honest with what it knows; availability is not fabricated. */
-      });
-    return () => { cancelled = true; };
-  }, []);
-
-  const providerAvailable = opticalSar?.available === true;
+export function SarFusionStatus({ scene, rule }: { scene: SensorNecessityScene; rule: SensorNecessityReport["locked_rule"] }) {
+  const metrics = [
+    ["Correct support", scene.correct_support_pixels.toLocaleString(), "pixels"],
+    ["Mismatch support", scene.mismatched_support_pixels.toLocaleString(), "pixels"],
+    ["Correct / mismatch", `${scene.correct_to_mismatched_support_ratio.toFixed(2)}×`, "support ratio"],
+    ["Mismatch reduction", `${scene.support_reduction_percent_when_mismatched.toFixed(2)}%`, "of support"],
+  ];
 
   return (
-    <section className="panel space-y-4 p-5" aria-label="Real vs prototype status">
-      <p className="eyebrow">What is real here</p>
-      <div className="space-y-3">
-        {ROWS.map((row) => (
-          <article key={row.title} className="rounded-lg border border-border bg-raised/45 p-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <StateBadge state={row.state} />
-              <h2 className="text-sm font-bold text-white">{row.title}</h2>
-            </div>
-            <p className="mt-2 text-xs leading-relaxed text-slate-400">{row.detail}</p>
-          </article>
+    <section className="panel space-y-4 p-5" aria-label="Frozen experiment result">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {metrics.map(([label, value, suffix]) => (
+          <div key={label} className="rounded-lg border border-border bg-raised/45 p-4">
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">{label}</p>
+            <p className="mt-2 text-2xl font-black text-white">{value}</p>
+            <p className="text-xs text-slate-400">{suffix}</p>
+          </div>
         ))}
       </div>
-      <p role="status" data-testid="optical-sar-status" className="text-xs text-slate-400">
-        {opticalSar === null
-          ? "optical_sar capability status: could not be verified (backend status unavailable)."
-          : providerAvailable
-            ? `optical_sar capability: registered to provider "${opticalSar.provider}". This page still displays human interpretation only.`
-            : "Verified against /api/capabilities: optical_sar has no registered provider and cannot execute in this build."}
+      <div className="grid gap-3 text-xs leading-relaxed text-slate-300 lg:grid-cols-2">
+        <p className="rounded-lg border border-success/25 bg-success/[0.06] p-3"><strong className="text-success">Correct pair:</strong> real S2 + spatially corresponding real S1.</p>
+        <p className="rounded-lg border border-warning/30 bg-warning/[0.06] p-3"><strong className="text-warning">Mismatch control:</strong> the same real S1 values deliberately translated spatially to destroy correspondence.</p>
+      </div>
+      <p className="font-mono text-[11px] leading-relaxed text-slate-400">
+        Frozen rule: NDWI {">"} {rule.ndwi_strictly_greater_than} · VV ≤ {rule.vv_linear_gamma0_terrain_max} · VH ≤ {rule.vh_linear_gamma0_terrain_max} · {rule.component_connectivity}-connected minimum {rule.minimum_component_pixels_inclusive} px
       </p>
     </section>
   );
-}
-
-function StateBadge({ state }: { state: "REAL" | "CACHED REAL" | "PROTOTYPE" }) {
-  const styles = {
-    REAL: "border-success/30 bg-success/10 text-success",
-    "CACHED REAL": "border-success/30 bg-success/10 text-success",
-    PROTOTYPE: "border-warning/30 bg-warning/10 text-warning",
-  } as const;
-  return <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black tracking-[0.08em] ${styles[state]}`}>{state}</span>;
 }

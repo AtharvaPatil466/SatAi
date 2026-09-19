@@ -1,0 +1,125 @@
+{
+  "schema_version": "1.0",
+  "statement": "deterministic proxy benchmark construction; not semantic ground truth and not model performance.",
+  "locked_rule": {
+    "ndwi_formula": "(B03-B08)/(B03+B08)",
+    "ndwi_strictly_greater_than": 0.048095703125,
+    "vv_linear_gamma0_terrain_max": 0.053388334810733795,
+    "vh_linear_gamma0_terrain_max": 0.00929180160164833,
+    "fusion": "optical AND SAR at the same pixel",
+    "component_connectivity": 8,
+    "minimum_component_pixels_inclusive": 64,
+    "target": "one-pixel inner boundary of filtered fused support"
+  },
+  "experiments": [
+    {
+      "scene_id": "cdse-yangtze-jiangsu-20200523",
+      "role": "rule-construction-scene",
+      "retuned": false,
+      "applied_rule": {
+        "ndwi_formula": "(B03-B08)/(B03+B08)",
+        "ndwi_strictly_greater_than": 0.048095703125,
+        "vv_linear_gamma0_terrain_max": 0.053388334810733795,
+        "vh_linear_gamma0_terrain_max": 0.00929180160164833,
+        "fusion": "optical AND SAR at the same pixel",
+        "component_connectivity": 8,
+        "minimum_component_pixels_inclusive": 64,
+        "target": "one-pixel inner boundary of filtered fused support"
+      },
+      "correct_support_pixels": 117496,
+      "mismatched_support_pixels": 19455,
+      "correct_to_mismatched_support_ratio": 6.039372911847854,
+      "support_reduction_percent_when_mismatched": 83.44198951453666,
+      "support_overlap": {
+        "intersection_pixels": 16686,
+        "union_pixels": 120265,
+        "iou": 0.13874360786596265,
+        "dice": 0.24367839592262927
+      },
+      "boundary_overlap": {
+        "correct_pixels": 30756,
+        "mismatched_pixels": 7734,
+        "intersection_pixels": 2267,
+        "union_pixels": 36223,
+        "iou": 0.06258454573061314,
+        "dice": 0.11779683034554429
+      },
+      "mismatch_transformation": {
+        "kind": "cyclic translation of the real SAR arrays",
+        "row_shift_down": 248,
+        "column_shift_right": 341,
+        "wraparound": true
+      },
+      "threshold_sensitivity": {
+        "ndwi_thresholds": [-0.0019042968750000028, 0.048095703125, 0.098095703125],
+        "sar_quantile_percent_candidates": [20, 25, 30],
+        "correct_support_pixel_range": [108761, 121959],
+        "mismatched_support_pixel_range": [17096, 21406],
+        "correct_to_mismatched_ratio_range": [5.697421283752219, 6.361780533458119],
+        "support_iou_range": [0.12267812832328961, 0.1504579861590011]
+      }
+    },
+    {
+      "scene_id": "cdse-rotterdam-port-20200530",
+      "role": "independent-frozen-rule-replication",
+      "retuned": false,
+      "applied_rule": {
+        "ndwi_formula": "(B03-B08)/(B03+B08)",
+        "ndwi_strictly_greater_than": 0.048095703125,
+        "vv_linear_gamma0_terrain_max": 0.053388334810733795,
+        "vh_linear_gamma0_terrain_max": 0.00929180160164833,
+        "fusion": "optical AND SAR at the same pixel",
+        "component_connectivity": 8,
+        "minimum_component_pixels_inclusive": 64,
+        "target": "one-pixel inner boundary of filtered fused support"
+      },
+      "correct_support_pixels": 65102,
+      "mismatched_support_pixels": 8114,
+      "correct_to_mismatched_support_ratio": 8.023416317475968,
+      "support_reduction_percent_when_mismatched": 87.5364812140948,
+      "support_overlap": {
+        "intersection_pixels": 5080,
+        "union_pixels": 68136,
+        "iou": 0.07455676881531055,
+        "dice": 0.13876748251748253
+      },
+      "boundary_overlap": {
+        "correct_pixels": 45413,
+        "mismatched_pixels": 6440,
+        "intersection_pixels": 2935,
+        "union_pixels": 48918,
+        "iou": 0.059998364610163946,
+        "dice": 0.11320463618305594
+      },
+      "mismatch_transformation": {
+        "kind": "cyclic translation of the real SAR arrays",
+        "row_shift_down": 341,
+        "column_shift_right": 336,
+        "wraparound": true,
+        "row_fraction_source": "248/744",
+        "column_fraction_source": "341/1024"
+      },
+      "frozen_threshold_percentile_positions": {
+        "material_difference_definition_percentage_points": 10,
+        "ndwi": {
+          "scene_1_percentile": 79.77137411794355,
+          "scene_2_percentile": 88.58884781125992,
+          "difference_percentage_points": 8.817473693316373,
+          "materially_different": false
+        },
+        "vv": {
+          "scene_1_percentile": 24.999934370627443,
+          "scene_2_percentile": 24.06897166418651,
+          "difference_percentage_points": -0.9309627064409334,
+          "materially_different": false
+        },
+        "vh": {
+          "scene_1_percentile": 24.999934370627443,
+          "scene_2_percentile": 23.63523453000992,
+          "difference_percentage_points": -1.3646998406175221,
+          "materially_different": false
+        }
+      }
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import type { AnalysisRequest, AnalysisResponse, CapabilityStatus, OperationState, PlanResponse, ResolutionReport, SarReport, SceneCatalog, SceneUploadResponse, TraceHistory, TraceVerification } from "./types";
+import type { AnalysisRequest, AnalysisResponse, CapabilityStatus, OperationState, PlanResponse, ResolutionReport, SarReport, SceneCatalog, SceneUploadResponse, SensorNecessityReport, TraceHistory, TraceVerification } from "./types";
 
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
@@ -57,6 +57,8 @@ export async function getSceneAsset(sceneId: string): Promise<Blob> {
 }
 export const getResolution = () => request<ResolutionReport>("/api/resolution");
 export const getSar = (scene = "mumbai-coastal") => request<SarReport>(`/api/sar/${encodeURIComponent(scene)}`);
+export const getSensorNecessity = () => request<SensorNecessityReport>("/api/sar/sensor-necessity");
+export const sensorNecessityRenderUrl = (path: string) => `${API_URL}${path.startsWith("/") ? path : `/${path}`}`;
 export const getTraces = () => request<TraceHistory>("/api/traces");
 export const verifyTraces = () => request<TraceVerification>("/api/traces/verify", { method: "POST" });
 export const getHealth = () => request<{ status: string; mode: string }>("/api/health");

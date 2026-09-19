@@ -1,0 +1,140 @@
+{
+  "schema_version": "prepared-vqa-measurement.v1",
+  "run_id": "qwen2.5vl-3b__prepared-vqa__loveda-0__20260919T155314.045034+0000",
+  "timestamp": "2026-09-19T15:53:14.045034+00:00",
+  "git_revision": "fe9a56d76d75170a062dd93ec436c82ebc6c01cc",
+  "scene": {
+    "scene_id": "loveda_LoveDA_images_png_0_gsd0.3",
+    "asset_path": "data/ladder/0.3/loveda_Train_Rural_images_png_0_gsd0.3.png",
+    "asset_sha256": "495a8e889c686611f5324cb1c03ecf2b22cedc424c868fc13a8666e2fc5ab0e0",
+    "pixel_sha256": "d45e01abf260141843f1adb8dbaf8a0f13e9b52b797a2b6780822f7569385d26",
+    "width": 1024,
+    "height": 1024
+  },
+  "model": {
+    "name": "qwen2.5vl-3b",
+    "identity": "Qwen/Qwen2.5-VL-3B-Instruct",
+    "wrapper": "models.qwen_vl.model.QwenVLModel"
+  },
+  "decoding": {
+    "do_sample": false,
+    "max_new_tokens": 50,
+    "torch_dtype": "float16",
+    "wrapper_prompt_suffix": " Answer with a single word or number only. No explanation."
+  },
+  "runtime": {
+    "python": "3.12.13 (main, Mar  4 2026, 09:23:07) [GCC 11.4.0]",
+    "platform": "Linux-6.12.90+-x86_64-with-glibc2.35",
+    "torch": "2.10.0+cu128",
+    "transformers": "5.0.0",
+    "qwen_vl_utils": "0.0.14",
+    "cuda_runtime": "12.8",
+    "gpu_count": 2,
+    "gpus": [
+      "Tesla T4",
+      "Tesla T4"
+    ]
+  },
+  "results": [
+    {
+      "tile_id": "loveda_LoveDA_images_png_0_gsd0.3",
+      "image_paths": [
+        "data/ladder/0.3/loveda_Train_Rural_images_png_0_gsd0.3.png"
+      ],
+      "question": "Are there agricultural fields in this image?",
+      "prediction": {
+        "answer": "Yes"
+      }
+    },
+    {
+      "tile_id": "loveda_LoveDA_images_png_0_gsd0.3",
+      "image_paths": [
+        "data/ladder/0.3/loveda_Train_Rural_images_png_0_gsd0.3.png"
+      ],
+      "question": "Is there vegetation in this image?",
+      "prediction": {
+        "answer": "Yes"
+      }
+    },
+    {
+      "tile_id": "loveda_LoveDA_images_png_0_gsd0.3",
+      "image_paths": [
+        "data/ladder/0.3/loveda_Train_Rural_images_png_0_gsd0.3.png"
+      ],
+      "question": "Are there roads visible in this image?",
+      "prediction": {
+        "answer": "Yes"
+      }
+    },
+    {
+      "tile_id": "loveda_LoveDA_images_png_0_gsd0.3",
+      "image_paths": [
+        "data/ladder/0.3/loveda_Train_Rural_images_png_0_gsd0.3.png"
+      ],
+      "question": "Are there multiple buildings visible in this image?",
+      "prediction": {
+        "answer": "No"
+      }
+    },
+    {
+      "tile_id": "loveda_LoveDA_images_png_0_gsd0.3",
+      "image_paths": [
+        "data/ladder/0.3/loveda_Train_Rural_images_png_0_gsd0.3.png"
+      ],
+      "question": "Is there a large body of water visible in this image?",
+      "prediction": {
+        "answer": "No"
+      }
+    },
+    {
+      "tile_id": "loveda_LoveDA_images_png_0_gsd0.3",
+      "image_paths": [
+        "data/ladder/0.3/loveda_Train_Rural_images_png_0_gsd0.3.png"
+      ],
+      "question": "What are the main features visible in this satellite image?",
+      "prediction": {
+        "answer": "Fields, trees, houses"
+      }
+    },
+    {
+      "tile_id": "loveda_LoveDA_images_png_0_gsd0.3",
+      "image_paths": [
+        "data/ladder/0.3/loveda_Train_Rural_images_png_0_gsd0.3.png"
+      ],
+      "question": "Describe the land cover visible in this image.",
+      "prediction": {
+        "answer": "3"
+      }
+    },
+    {
+      "tile_id": "loveda_LoveDA_images_png_0_gsd0.3",
+      "image_paths": [
+        "data/ladder/0.3/loveda_Train_Rural_images_png_0_gsd0.3.png"
+      ],
+      "question": "Is this area densely built up?",
+      "prediction": {
+        "answer": "No"
+      }
+    },
+    {
+      "tile_id": "loveda_LoveDA_images_png_0_gsd0.3",
+      "image_paths": [
+        "data/ladder/0.3/loveda_Train_Rural_images_png_0_gsd0.3.png"
+      ],
+      "question": "What type of area is shown in this satellite image?",
+      "prediction": {
+        "answer": "Agriculture"
+      }
+    },
+    {
+      "tile_id": "loveda_LoveDA_images_png_0_gsd0.3",
+      "image_paths": [
+        "data/ladder/0.3/loveda_Train_Rural_images_png_0_gsd0.3.png"
+      ],
+      "question": "Describe this satellite image in one sentence.",
+      "prediction": {
+        "answer": "Agricultural fields and forested areas."
+      }
+    }
+  ]
+}
