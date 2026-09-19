@@ -1,43 +1,18 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 import { SarFusionStatus } from "./SarFusionStatus";
-import * as api from "@/lib/api";
+import type { SensorNecessityReport, SensorNecessityScene } from "@/lib/types";
 
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-});
+afterEach(cleanup);
 
-describe("SarFusionStatus real-vs-prototype panel", () => {
-  it("labels the human interpretation as CACHED REAL and fusion as PROTOTYPE", () => {
-    vi.spyOn(api, "getCapabilities").mockRejectedValue(new api.ApiError(0, "down"));
-    render(<SarFusionStatus />);
-    expect(screen.getByText("CACHED REAL")).toBeTruthy();
-    expect(screen.getByText("PROTOTYPE")).toBeTruthy();
-    expect(screen.getByText("Human analyst interpretation")).toBeTruthy();
-    expect(screen.getByText("Optical–SAR fusion")).toBeTruthy();
-  });
-
-  it("verifies the optical_sar prototype claim against /api/capabilities", async () => {
-    vi.spyOn(api, "getCapabilities").mockResolvedValue({
-      capabilities: [
-        { name: "single_image_vqa", available: true, provider: "qwen2.5vl-3b" },
-        { name: "grounding", available: true, provider: "grounding-dino-swint" },
-        { name: "change_vqa", available: false, provider: null },
-        { name: "optical_sar", available: false, provider: null },
-      ],
-    });
-    render(<SarFusionStatus />);
-    await waitFor(() => {
-      expect(screen.getByTestId("optical-sar-status").textContent).toContain("no registered provider");
-    });
-  });
-
-  it("does not claim unavailability when the backend status cannot be reached", async () => {
-    vi.spyOn(api, "getCapabilities").mockRejectedValue(new api.ApiError(0, "down"));
-    render(<SarFusionStatus />);
-    await waitFor(() => {
-      expect(screen.getByTestId("optical-sar-status").textContent).toContain("could not be verified");
-    });
+describe("SarFusionStatus", () => {
+  it("shows frozen API metrics as correspondence evidence, not performance", () => {
+    const scene = { correct_support_pixels: 117496, mismatched_support_pixels: 19455, correct_to_mismatched_support_ratio: 6.03937, support_reduction_percent_when_mismatched: 83.44199 } as SensorNecessityScene;
+    const rule = { ndwi_strictly_greater_than: 0.048095703125, vv_linear_gamma0_terrain_max: 0.053388334810733795, vh_linear_gamma0_terrain_max: 0.00929180160164833, component_connectivity: 8, minimum_component_pixels_inclusive: 64 } as SensorNecessityReport["locked_rule"];
+    render(<SarFusionStatus scene={scene} rule={rule} />);
+    for (const value of ["117,496", "19,455", "6.04×", "83.44%", "Correct pair:", "Mismatch control:"]) {
+      expect(screen.getByText(value)).toBeTruthy();
+    }
+    expect(screen.queryByText(/accuracy|provider/i)).toBeNull();
   });
 });

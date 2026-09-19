@@ -1,63 +1,75 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import { fireEvent } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import SarPage from "./page";
 import * as api from "@/lib/api";
-import type { SarReport } from "@/lib/types";
+import type { SensorNecessityReport, SensorNecessityScene } from "@/lib/types";
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
 
-const report = (scene: string, title: string): SarReport => ({
-  scene,
-  title,
-  human_validation: true,
-  data_source: "real_sar_grd_rtc",
-  sensor: "Sentinel-1 C-band SAR, IW GRD, dual-polarization VV/VH",
-  location: "UNKNOWN",
-  latitude: null,
-  longitude: null,
-  acquisition_date: null,
-  processing_job_id: null,
-  processing_chain: "Sentinel-1 IW GRD (VV+VH) -> ASF HyP3 RTC gamma-0",
-  render_available: false,
-  fusion_capability: "prototype_analyst_validation_not_ai_model_output",
-  summaries: { water: "w", built_up: "b", vegetation: "v", terrain: "t" },
-  annotation: "verbatim analyst text",
+const scene = (scene_id: string, geographic_description: string, ratio: number): SensorNecessityScene => ({
+  scene_id,
+  geographic_description,
+  bbox: [1, 2, 3, 4],
+  s1: {
+    product_id: `S1-${scene_id}`,
+    timestamp: "2020-05-23T10:03:18Z",
+    polarization: ["VV", "VH"],
+    orbit_direction: "ascending",
+    relative_orbit: 69,
+    processing: { acquisition_mode: "IW", resolution: "HIGH", orthorectification: true, dem_instance: "COPERNICUS_30", backscatter_coefficient: "GAMMA0_TERRAIN", stored_units: "linear" },
+  },
+  s2: { product_id: `S2-${scene_id}`, timestamp: "2020-05-23T02:49:02.273Z", cloud_cover_percent: 4.39 },
+  temporal_separation_seconds: 26055.727,
+  grid: { width: 1024, height: 744, crs: "EPSG:4326" },
+  correct_support_pixels: 117496,
+  mismatched_support_pixels: 19455,
+  correct_to_mismatched_support_ratio: ratio,
+  support_reduction_percent_when_mismatched: 83.4419895,
+  support_overlap: { intersection_pixels: 1, union_pixels: 2, iou: 0.5, dice: 0.66 },
+  boundary_overlap: { correct_pixels: 1, mismatched_pixels: 1, intersection_pixels: 0, union_pixels: 2, iou: 0, dice: 0 },
+  retuned: false,
+  renders: Object.fromEntries(["optical", "sar", "correct-fusion", "mismatched-sar"].map((name) => [name, { url: `/api/${scene_id}/${name}`, available: true }])) as SensorNecessityScene["renders"],
 });
 
-describe("/sar Optical-SAR prototype page", () => {
-  it("shows the human-validation banner and provenance after a successful fetch", async () => {
-    vi.spyOn(api, "getSar").mockResolvedValue(report("mumbai-coastal", "Mumbai coastal"));
-    vi.spyOn(api, "getCapabilities").mockRejectedValue(new api.ApiError(0, "down"));
+const report: SensorNecessityReport = {
+  benchmark: "Frozen Sensor Necessity",
+  status: "frozen",
+  classification: "deterministic proxy; not model performance",
+  disclaimer: "deterministic proxy benchmark construction; not semantic ground truth and not model performance.",
+  locked_rule: { ndwi_formula: "(B03-B08)/(B03+B08)", ndwi_strictly_greater_than: 0.048095703125, vv_linear_gamma0_terrain_max: 0.053388334810733795, vh_linear_gamma0_terrain_max: 0.00929180160164833, fusion: "optical AND SAR at the same pixel", component_connectivity: 8, minimum_component_pixels_inclusive: 64, target: "one-pixel inner boundary" },
+  scenes: [
+    scene("cdse-yangtze-jiangsu-20200523", "Yangtze River near Jiangsu", 6.039),
+    scene("cdse-rotterdam-port-20200530", "Rotterdam port", 8.023),
+  ],
+};
+
+describe("/sar frozen Sensor Necessity page", () => {
+  it("shows API-backed metrics and four scientific panels", async () => {
+    vi.spyOn(api, "getSensorNecessity").mockResolvedValue(report);
     render(<SarPage />);
-    expect(screen.getByText("HUMAN SAR VALIDATION — NOT AI MODEL OUTPUT")).toBeTruthy();
-    await waitFor(() => expect(screen.getByText("Mumbai coastal")).toBeTruthy());
-    expect(screen.getByText("Scene provenance")).toBeTruthy();
-    expect(screen.getByText("What is real here")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("6.04×")).toBeTruthy());
+    for (const title of ["OPTICAL", "SAR", "CORRECT PAIR", "MISMATCH CONTROL"]) {
+      expect(screen.getAllByText(title).length).toBeGreaterThan(0);
+    }
+    expect(screen.getByText("Deterministic proxy benchmark · Not model performance")).toBeTruthy();
   });
 
-  it("fetches each annotated scene from the real endpoint when selected", async () => {
-    const getSar = vi.spyOn(api, "getSar").mockImplementation((scene) =>
-      Promise.resolve(report(scene ?? "mumbai-coastal", scene ?? "Mumbai coastal")),
-    );
-    vi.spyOn(api, "getCapabilities").mockRejectedValue(new api.ApiError(0, "down"));
+  it("switches between the two scene IDs returned by the API", async () => {
+    vi.spyOn(api, "getSensorNecessity").mockResolvedValue(report);
     render(<SarPage />);
-    await waitFor(() => expect(getSar).toHaveBeenCalledWith("mumbai-coastal"));
-    fireEvent.click(screen.getByRole("button", { name: "Konkan coast" }));
-    await waitFor(() => expect(getSar).toHaveBeenCalledWith("konkan-coast"));
+    await waitFor(() => expect(screen.getByText("6.04×")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Rotterdam port" }));
+    expect(screen.getByText("8.02×")).toBeTruthy();
+    expect(screen.getByText("cdse-rotterdam-port-20200530")).toBeTruthy();
   });
 
-  it("fails closed with no substitute annotation when the backend cannot serve a scene", async () => {
-    vi.spyOn(api, "getSar").mockRejectedValue(new api.ApiError(404, "No analyst annotation exists for SAR scene 'x'."));
-    vi.spyOn(api, "getCapabilities").mockRejectedValue(new api.ApiError(0, "down"));
+  it("fails visibly without substitute results when the API fails", async () => {
+    vi.spyOn(api, "getSensorNecessity").mockRejectedValue(new api.ApiError(503, "Frozen manifest unavailable."));
     render(<SarPage />);
-    await waitFor(() => {
-      expect(screen.getByRole("alert").textContent).toContain("fails closed");
-    });
-    expect(screen.queryByText("Scene provenance")).toBeNull();
-    expect(screen.queryByText("verbatim analyst text")).toBeNull();
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("No substitute results or imagery"));
+    expect(screen.queryByText("CORRECT PAIR")).toBeNull();
   });
 });

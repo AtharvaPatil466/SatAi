@@ -1,63 +1,23 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { SarProvenance } from "./SarProvenance";
-import type { SarReport } from "@/lib/types";
+import type { SensorNecessityScene } from "@/lib/types";
 
 afterEach(cleanup);
 
-const report = (overrides: Partial<SarReport> = {}): SarReport => ({
-  scene: "mumbai-coastal",
-  title: "Mumbai coastal",
-  human_validation: true,
-  data_source: "real_sar_grd_rtc",
-  sensor: "Sentinel-1 C-band SAR, IW GRD, dual-polarization VV/VH",
-  location: "19.05, 72.85",
-  latitude: 19.05,
-  longitude: 72.85,
-  acquisition_date: null,
-  processing_job_id: "71cf874e-4303-4e1f-9ab7-74037b1956c9",
-  processing_chain: "Sentinel-1 IW GRD (VV+VH) -> ASF HyP3 RTC gamma-0",
-  render_available: false,
-  fusion_capability: "prototype_analyst_validation_not_ai_model_output",
-  summaries: { water: "w", built_up: "b", vegetation: "v", terrain: "t" },
-  annotation: "annotation",
-  ...overrides,
-});
+const scene = {
+  s1: { product_id: "S1_PRODUCT", timestamp: "2020-05-23T10:03:18Z", polarization: ["VV", "VH"], orbit_direction: "ascending", relative_orbit: 69, processing: { orthorectification: true, dem_instance: "COPERNICUS_30", backscatter_coefficient: "GAMMA0_TERRAIN", stored_units: "linear" } },
+  s2: { product_id: "S2_PRODUCT", timestamp: "2020-05-23T02:49:02.273Z", cloud_cover_percent: 4.39 },
+  temporal_separation_seconds: 26055.727,
+  grid: { width: 1024, height: 744, crs: "EPSG:4326" },
+} as SensorNecessityScene;
 
-describe("SarProvenance truthful display", () => {
-  it("shows recorded provenance facts without embellishment", () => {
-    render(<SarProvenance report={report()} />);
-    expect(screen.getByText("19.05, 72.85")).toBeTruthy();
-    expect(screen.getByText("71cf874e-4303-4e1f-9ab7-74037b1956c9")).toBeTruthy();
-    expect(screen.getByText("Sentinel-1 C-band SAR, IW GRD, dual-polarization VV/VH")).toBeTruthy();
-    expect(screen.getByText("Sentinel-1 IW GRD (VV+VH) -> ASF HyP3 RTC gamma-0")).toBeTruthy();
-  });
-
-  it("labels missing acquisition date as unknown instead of inventing values", () => {
-    render(<SarProvenance report={report()} />);
-    expect(screen.getByText("UNKNOWN")).toBeTruthy();
-    expect(screen.getByText("Not committed — viewer fails closed")).toBeTruthy();
-  });
-
-  it("marks an unrecorded processing job as not recorded", () => {
-    render(<SarProvenance report={report({ processing_job_id: null })} />);
-    expect(screen.getByText("Not recorded in this repository")).toBeTruthy();
-  });
-
-  it("marks unrecorded locations as UNKNOWN for scenes without provenance", () => {
-    render(
-      <SarProvenance
-        report={report({
-          scene: "flat-inland-plain",
-          location: "UNKNOWN",
-          latitude: null,
-          longitude: null,
-          processing_job_id: null,
-        })}
-      />,
-    );
-    const unknowns = screen.getAllByText("UNKNOWN");
-    expect(unknowns.length).toBeGreaterThanOrEqual(2);
-    expect(screen.queryByText("19.05, 72.85")).toBeNull();
+describe("SarProvenance", () => {
+  it("shows CDSE provenance from both acquisitions without ASF/HyP3 claims", () => {
+    render(<SarProvenance scene={scene} />);
+    for (const value of ["S1_PRODUCT", "S2_PRODUCT", "VV / VH", "ascending · relative orbit 69", "EPSG:4326 · 1024×744", "4.39%", "GAMMA0_TERRAIN (linear) · orthorectification enabled · DEM COPERNICUS_30"]) {
+      expect(screen.getByText(value)).toBeTruthy();
+    }
+    expect(screen.queryByText(/ASF|HyP3/)).toBeNull();
   });
 });

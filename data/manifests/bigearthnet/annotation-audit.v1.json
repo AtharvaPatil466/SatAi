@@ -1,0 +1,175 @@
+{
+  "annotation_rows": 9553962,
+  "categories": {
+    "None": 463932,
+    "adjacency": 1222128,
+    "area": 1390845,
+    "climate zone": 463637,
+    "count": 1390730,
+    "country": 463274,
+    "point": 1143883,
+    "presence": 1391053,
+    "reference": 1061803,
+    "relative pos": 99015,
+    "season": 463662
+  },
+  "country_rows": {
+    "Austria": 904001,
+    "Belgium": 234456,
+    "Finland": 3015585,
+    "Ireland": 810044,
+    "Kosovo": 33358,
+    "Lithuania": 1069085,
+    "Luxembourg": 76977,
+    "Portugal": 1823941,
+    "Serbia": 1484576,
+    "Switzerland": 101939
+  },
+  "country_scenes": {
+    "Austria": 41890,
+    "Belgium": 10171,
+    "Finland": 151443,
+    "Ireland": 44909,
+    "Kosovo": 1571,
+    "Lithuania": 46857,
+    "Luxembourg": 3251,
+    "Portugal": 87111,
+    "Serbia": 72220,
+    "Switzerland": 4621
+  },
+  "duplicate_annotation_ids": 0,
+  "generated_at": "2026-09-19T04:00:02.293066+00:00",
+  "malformed_identifiers": {
+    "patch_id": 0,
+    "s1_name": 0,
+    "split": 0
+  },
+  "mapping": {
+    "annotation_patches_missing_from_v2_metadata": 0,
+    "annotation_to_metadata_s1_mismatches": 0,
+    "sample_s1_mismatches": [],
+    "sample_unresolved_patch_ids": []
+  },
+  "metadata": {
+    "conflicting_s1_mappings": 0,
+    "duplicate_patch_ids": 0,
+    "rows": 549488,
+    "unique_patch_ids": 549488
+  },
+  "missing_identifiers": {
+    "ID": 0,
+    "country": 0,
+    "patch_id": 0,
+    "s1_name": 0,
+    "season": 0,
+    "split": 0
+  },
+  "season_rows": {
+    "Fall": 2837657,
+    "Spring": 3304787,
+    "Summer": 1937503,
+    "Winter": 1474015
+  },
+  "season_scenes": {
+    "Fall": 136424,
+    "Spring": 159890,
+    "Summer": 95033,
+    "Winter": 72697
+  },
+  "split_rows": {
+    "bench": 15029,
+    "test": 2409962,
+    "train": 4674281,
+    "validation": 2454690
+  },
+  "task_types": {
+    "binary": 3625160,
+    "bounding box": 2205686,
+    "captioning": 463932,
+    "mcq": 3259184
+  },
+  "text_search": {
+    "counts": {
+      "SAR": {
+        "either": 0,
+        "input": 0,
+        "output": 0
+      },
+      "Sentinel-1": {
+        "either": 0,
+        "input": 0,
+        "output": 0
+      },
+      "VH": {
+        "either": 0,
+        "input": 0,
+        "output": 0
+      },
+      "VV": {
+        "either": 0,
+        "input": 0,
+        "output": 0
+      },
+      "backscatter": {
+        "either": 0,
+        "input": 0,
+        "output": 0
+      },
+      "optical": {
+        "either": 0,
+        "input": 0,
+        "output": 0
+      },
+      "polarization": {
+        "either": 0,
+        "input": 0,
+        "output": 0
+      },
+      "radar": {
+        "either": 0,
+        "input": 0,
+        "output": 0
+      }
+    },
+    "method": "case-insensitive whole-token RE2 regex over input, output, and their concatenation",
+    "patterns": {
+      "SAR": "(?i)(?:^|[^A-Za-z0-9_])SAR(?:$|[^A-Za-z0-9_])",
+      "Sentinel-1": "(?i)(?:^|[^A-Za-z0-9_])Sentinel-1(?:$|[^A-Za-z0-9_])",
+      "VH": "(?i)(?:^|[^A-Za-z0-9_])VH(?:$|[^A-Za-z0-9_])",
+      "VV": "(?i)(?:^|[^A-Za-z0-9_])VV(?:$|[^A-Za-z0-9_])",
+      "backscatter": "(?i)(?:^|[^A-Za-z0-9_])backscatter(?:$|[^A-Za-z0-9_])",
+      "optical": "(?i)(?:^|[^A-Za-z0-9_])optical(?:$|[^A-Za-z0-9_])",
+      "polarization": "(?i)(?:^|[^A-Za-z0-9_])polari[sz]ation(?:$|[^A-Za-z0-9_])",
+      "radar": "(?i)(?:^|[^A-Za-z0-9_])radar(?:$|[^A-Za-z0-9_])"
+    }
+  },
+  "unique_patch_ids": 464044,
+  "unique_s1_names": 464044,
+  "unique_scene_pairs": 464044,
+  "unique_scenes_per_split": {
+    "bench": {
+      "patch_ids": 1082,
+      "s1_names": 1082
+    },
+    "test": {
+      "patch_ids": 115753,
+      "s1_names": 115753
+    },
+    "train": {
+      "patch_ids": 229114,
+      "s1_names": 229114
+    },
+    "validation": {
+      "patch_ids": 118095,
+      "s1_names": 118095
+    }
+  },
+  "within_patch_conflicts": {
+    "country": 0,
+    "latitude": 0,
+    "longitude": 0,
+    "s1_name": 0,
+    "season": 0,
+    "split": 0
+  }
+}

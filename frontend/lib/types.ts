@@ -183,3 +183,55 @@ export interface SarReport {
   summaries: Record<"water" | "built_up" | "vegetation" | "terrain", string>;
   annotation: string;
 }
+
+export type SensorNecessityRenderName = "optical" | "sar" | "correct-fusion" | "mismatched-sar";
+
+export interface SensorNecessityScene {
+  scene_id: string;
+  geographic_description: string;
+  bbox: number[];
+  s1: {
+    product_id: string;
+    timestamp: string;
+    polarization: string[];
+    orbit_direction: string;
+    relative_orbit: number;
+    processing: {
+      acquisition_mode: string;
+      resolution: string;
+      orthorectification: boolean;
+      dem_instance: string;
+      backscatter_coefficient: string;
+      stored_units: string;
+    };
+  };
+  s2: { product_id: string; timestamp: string; cloud_cover_percent: number };
+  temporal_separation_seconds: number;
+  grid: { width: number; height: number; crs: string };
+  correct_support_pixels: number;
+  mismatched_support_pixels: number;
+  correct_to_mismatched_support_ratio: number;
+  support_reduction_percent_when_mismatched: number;
+  support_overlap: { intersection_pixels: number; union_pixels: number; iou: number; dice: number };
+  boundary_overlap: { correct_pixels: number; mismatched_pixels: number; intersection_pixels: number; union_pixels: number; iou: number; dice: number };
+  retuned: boolean;
+  renders: Record<SensorNecessityRenderName, { url: string; available: boolean }>;
+}
+
+export interface SensorNecessityReport {
+  benchmark: string;
+  status: "frozen";
+  classification: string;
+  disclaimer: string;
+  locked_rule: {
+    ndwi_formula: string;
+    ndwi_strictly_greater_than: number;
+    vv_linear_gamma0_terrain_max: number;
+    vh_linear_gamma0_terrain_max: number;
+    fusion: string;
+    component_connectivity: number;
+    minimum_component_pixels_inclusive: number;
+    target: string;
+  };
+  scenes: SensorNecessityScene[];
+}

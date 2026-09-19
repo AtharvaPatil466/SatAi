@@ -1,0 +1,97 @@
+{
+  "schema_version": "1.0",
+  "source": "Copernicus Data Space Ecosystem Sentinel Hub Catalog and Process APIs",
+  "scene_count": 2,
+  "scenes": [
+    {
+      "scene_id": "cdse-yangtze-jiangsu-20200523",
+      "geographic_description": "Yangtze River water/land corridor near Zhenjiang, Jiangsu, China",
+      "bbox": [119.6098709, 32.1767749, 119.9147415, 32.3640133],
+      "s1": {
+        "selected_product_id": "S1A_IW_GRDH_1SDV_20200523T100318_20200523T100343_032691_03C95D_B3F8_COG.SAFE",
+        "timestamp": "2020-05-23T10:03:18Z",
+        "polarization": ["VV", "VH"],
+        "orbit_direction": "ascending",
+        "relative_orbit": 69,
+        "processing": {
+          "acquisition_mode": "IW",
+          "resolution": "HIGH",
+          "orthorectification": true,
+          "dem_instance": "COPERNICUS_30",
+          "backscatter_coefficient": "GAMMA0_TERRAIN",
+          "stored_units": "linear"
+        },
+        "geotiff": {
+          "sha256": "5d0eee03584dd5e35e9bf37f1ddcc3d6a3927c245b52af5a54355c55265e8bfd",
+          "size_bytes": 6259602
+        }
+      },
+      "s2": {
+        "selected_product_id": "S2A_MSIL2A_20200523T023551_N0500_R089_T50SQA_20230404T030902.SAFE",
+        "timestamp": "2020-05-23T02:49:02.273Z",
+        "cloud_cover_percent": 4.39,
+        "geotiff": {
+          "sha256": "64b6ee2370f4085d8490d4e773de8bd11b8cb1129ffa92c1ba80522934296da8",
+          "size_bytes": 7960312
+        }
+      },
+      "temporal_separation_seconds": 26055.727,
+      "output_grid": {
+        "width": 1024,
+        "height": 744,
+        "crs": "EPSG:4326"
+      },
+      "provenance_limitations": [
+        "The bounded Process response is not a full Sentinel product.",
+        "The Process userdata returned S1 tileId 1103077 but did not echo the S1 product ID; the narrow time, mode, resolution, and polarization filters constrain it to the verified Catalog acquisition.",
+        "The S2 product ID was echoed by Process userdata.",
+        "Source pixels and generated renders remain external and are not committed."
+      ]
+    },
+    {
+      "scene_id": "cdse-rotterdam-port-20200530",
+      "geographic_description": "Rotterdam port and river corridor, Netherlands",
+      "bbox": [4.1, 51.82, 4.42, 52.02],
+      "s1": {
+        "selected_product_id": "S1B_IW_GRDH_1SDV_20200530T172421_20200530T172446_021814_029680_8520_COG.SAFE",
+        "timestamp": "2020-05-30T17:24:21Z",
+        "polarization": ["VV", "VH"],
+        "orbit_direction": "ascending",
+        "relative_orbit": 88,
+        "processing": {
+          "acquisition_mode": "IW",
+          "resolution": "HIGH",
+          "orthorectification": true,
+          "dem_instance": "COPERNICUS_30",
+          "backscatter_coefficient": "GAMMA0_TERRAIN",
+          "stored_units": "linear"
+        },
+        "geotiff": {
+          "sha256": "3f79fa6abe45e7e16a4f320296adacefae1eeb76f33fb7ba278a488d32b50b95",
+          "size_bytes": 8454600
+        }
+      },
+      "s2": {
+        "selected_product_id": "S2A_MSIL2A_20200530T105031_N0500_R051_T31UET_20230503T040244.SAFE",
+        "timestamp": "2020-05-30T10:56:47.555Z",
+        "cloud_cover_percent": 0.59,
+        "geotiff": {
+          "sha256": "ace9037b63278c26a5ebafba41e27c78623b38af8190ba99f008d161b9000c17",
+          "size_bytes": 10917236
+        }
+      },
+      "temporal_separation_seconds": 23253.445,
+      "output_grid": {
+        "width": 1008,
+        "height": 1024,
+        "crs": "EPSG:4326"
+      },
+      "provenance_limitations": [
+        "The bounded Process response is not a full Sentinel product.",
+        "The Process userdata returned S1 tileId 1135972 but did not echo the S1 product ID; the narrow time, orbit, mode, resolution, and polarization filters constrain it to the selected Catalog acquisition.",
+        "The S2 product ID was echoed by Process userdata.",
+        "Source pixels and generated renders remain external and are not committed."
+      ]
+    }
+  ]
+}
