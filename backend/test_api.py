@@ -15,6 +15,7 @@ from rasterio.io import MemoryFile
 from rasterio.transform import from_origin
 
 import backend.services as services
+import backend.scene_pack as scene_pack
 import orchestrator.trace as trace_store
 from backend.main import app
 from backend.routes import analyze as analyze_routes
@@ -25,6 +26,7 @@ from orchestrator import router as model_router
 
 @pytest.fixture(autouse=True)
 def isolated_trace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    services.load_results.cache_clear()
     services.load_prepared_vqa_results.cache_clear()
     trace_store._TRACE.clear()
     trace_store._LOADED_PATH = None
@@ -136,6 +138,7 @@ def test_prepared_measured_vqa_replays_exact_cache_without_live_inference(
             "scene_id": services.GOLDEN_SCENE_ID,
             "question": question,
             "sensor": "LoveDA",
+            "execution_mode": "cached_result",
         },
     )
     assert response.status_code == 200
@@ -144,7 +147,9 @@ def test_prepared_measured_vqa_replays_exact_cache_without_live_inference(
     assert payload["execution_mode"] == "cached_result"
     assert payload["results_artifact"] == services.RESULTS_RELATIVE_PATH
     assert payload["model"]["name"] == services.MODEL_NAME
+    assert payload["model"]["version"] == "Qwen/Qwen2.5-VL-3B-Instruct"
     assert payload["trace"]["input_summary"]["question"] == question
+    assert payload["trace"]["params"]["scene_id"] == services.GOLDEN_SCENE_ID
     assert payload["trace"]["params"]["results_artifact"] == services.RESULTS_RELATIVE_PATH
     assert payload["trace"]["params"]["planner_version"] == "phase0-rules-v1"
     assert payload["trace"]["params"]["planner_rule"] == "default_single_image_vqa"
@@ -201,6 +206,7 @@ def test_prepared_vqa_artifact_replays_every_exact_measured_answer(
             "scene_id": services.GOLDEN_SCENE_ID,
             "question": question,
             "sensor": "LoveDA",
+            "execution_mode": "cached_result",
         },
     )
     assert response.status_code == 200
@@ -218,9 +224,38 @@ def test_prepared_vqa_artifact_replays_every_exact_measured_answer(
     trace = client.get("/api/traces").json()
     assert trace["count"] == 1
     assert trace["records"][0]["input_summary"]["question"] == question
+    assert trace["records"][0]["params"]["scene_id"] == services.GOLDEN_SCENE_ID
     assert trace["records"][0]["params"]["results_artifact"] == (
         services.PREPARED_VQA_RESULTS_RELATIVE_PATH
     )
+    assert client.post("/api/traces/verify").json() == {
+        "verified": True,
+        "message": "Chain verified (1 records)",
+    }
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        *(question for question, _ in PREPARED_VQA_CASES),
+        services.GOLDEN_QUESTION,
+        "What is the dominant land cover in this image?",
+        "is there a building in this image?",
+        "Is there a building in this image",
+        "What crops are growing here?",
+    ],
+)
+def test_plan_accepts_questions_independent_of_measured_artifacts_without_trace(
+    client: TestClient, question: str
+) -> None:
+    response = client.post(
+        "/api/plan",
+        json={"scene_id": services.GOLDEN_SCENE_ID, "question": question},
+    )
+    assert response.status_code == 200
+    assert response.json()["executable"] is True
+    assert response.json()["unavailable_reason"] is None
+    assert client.get("/api/traces").json()["count"] == 0
 
 
 def test_prepared_vqa_strips_only_surrounding_whitespace(client: TestClient) -> None:
@@ -231,6 +266,7 @@ def test_prepared_vqa_strips_only_surrounding_whitespace(client: TestClient) -> 
             "scene_id": services.GOLDEN_SCENE_ID,
             "question": f"  {question}\n",
             "sensor": "LoveDA",
+            "execution_mode": "cached_result",
         },
     )
     assert response.status_code == 200
@@ -240,6 +276,12 @@ def test_prepared_vqa_strips_only_surrounding_whitespace(client: TestClient) -> 
 
 def test_prepared_vqa_artifact_provenance_is_valid() -> None:
     report = services.load_prepared_vqa_results()
+    assert hashlib.sha256(services.RESULTS_PATH.read_bytes()).hexdigest() == (
+        "2feb71dcd8f19570cefc5840c69224c426d8072cec32cd12defd6f657f7ee6a0"
+    )
+    assert hashlib.sha256(services.PREPARED_VQA_RESULTS_PATH.read_bytes()).hexdigest() == (
+        "0a2afb9bbc1479b76c27dca86423cde3a80709b02e7c707a561b3776640c449b"
+    )
     assert report["schema_version"] == "prepared-vqa-measurement.v1"
     assert report["git_revision"] == "fe9a56d76d75170a062dd93ec436c82ebc6c01cc"
     assert report["scene"]["scene_id"] == services.GOLDEN_SCENE_ID
@@ -282,6 +324,7 @@ def test_prepared_unmeasured_vqa_fails_closed_without_live_inference(
             "scene_id": services.GOLDEN_SCENE_ID,
             "question": question,
             "sensor": "LoveDA",
+            "execution_mode": "cached_result",
         },
     )
     assert response.status_code == 422
@@ -313,6 +356,7 @@ def test_duplicate_prepared_vqa_rows_fail_closed(
             "scene_id": services.GOLDEN_SCENE_ID,
             "question": services.GOLDEN_QUESTION,
             "sensor": "LoveDA",
+            "execution_mode": "cached_result",
         },
     )
     assert response.status_code == 503
@@ -338,6 +382,7 @@ def test_cross_artifact_duplicate_prepared_vqa_row_fails_closed(
             "scene_id": services.GOLDEN_SCENE_ID,
             "question": row["question"],
             "sensor": "LoveDA",
+            "execution_mode": "cached_result",
         },
     )
     assert response.status_code == 503
@@ -367,12 +412,33 @@ def test_missing_or_malformed_prepared_vqa_artifact_fails_closed(
             "scene_id": services.GOLDEN_SCENE_ID,
             "question": PREPARED_VQA_CASES[0][0],
             "sensor": "LoveDA",
+            "execution_mode": "cached_result",
         },
     )
     assert response.status_code == 503
     assert response.json() == {
         "detail": "Required analysis artifacts are temporarily unavailable."
     }
+    assert client.get("/api/traces").json()["count"] == 0
+
+
+@pytest.mark.parametrize("contents", [None, b"{}"])
+def test_missing_or_modified_ladder_artifact_fails_closed(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    contents: bytes | None,
+) -> None:
+    artifact_path = tmp_path / "ladder.json"
+    if contents is not None:
+        artifact_path.write_bytes(contents)
+    monkeypatch.setattr(services, "RESULTS_PATH", artifact_path)
+    services.load_results.cache_clear()
+    response = client.post(
+        "/api/analyze",
+        json={"scene_id": services.GOLDEN_SCENE_ID, "question": services.GOLDEN_QUESTION, "execution_mode": "cached_result"},
+    )
+    assert response.status_code == 503
     assert client.get("/api/traces").json()["count"] == 0
 
 
@@ -453,6 +519,7 @@ def test_png_upload_returns_factual_metadata(client: TestClient) -> None:
     assert manifest["source"]["native_path"] is None
     assert manifest["source"]["format"] == "PNG"
     assert manifest["raster"] is None
+
 
 def test_uploaded_pixels_never_become_prepared_scene_identity(
     client: TestClient,
@@ -924,6 +991,60 @@ def test_uploaded_scene_never_uses_golden_cached_result(
     assert "model unavailable" not in response.text
 
 
+def test_exact_prepared_pixels_and_question_use_live_provider(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pixels = (services.ROOT / services.GOLDEN_ASSET_RELATIVE_PATH).read_bytes()
+    created = upload(client, "scene.png", pixels).json()
+    assert created["scene_id"] != services.GOLDEN_SCENE_ID
+    monkeypatch.setattr(
+        services, "find_cached_result", lambda *_: pytest.fail("normal analysis read golden result")
+    )
+    monkeypatch.setattr(
+        services, "cached_scene", lambda *_: pytest.fail("normal analysis read curated result")
+    )
+    model = SimpleNamespace(
+        version="test", infer=lambda **_: {"answer": "live answer", "evidence": []}
+    )
+    monkeypatch.setattr(model_router, "get", lambda _: model)
+
+    response = client.post(
+        "/api/analyze",
+        json={"scene_id": created["scene_id"], "question": services.GOLDEN_QUESTION},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "live answer"
+    assert response.json()["execution_mode"] == "live"
+    assert response.json()["results_artifact"] is None
+    records = trace_store.records()
+    assert len(records) == 1
+    assert records[0]["params"]["execution_mode"] == "live"
+    assert records[0]["params"]["scene_id"] == created["scene_id"]
+    assert records[0]["input_summary"]["question"] == services.GOLDEN_QUESTION
+
+
+def test_exact_prepared_pixels_do_not_hide_unavailable_provider(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pixels = (services.ROOT / services.GOLDEN_ASSET_RELATIVE_PATH).read_bytes()
+    created = upload(client, "scene.png", pixels).json()
+    monkeypatch.setattr(
+        services,
+        "route",
+        lambda **_: (_ for _ in ()).throw(RuntimeError("CUDA GPU unavailable")),
+    )
+
+    response = client.post(
+        "/api/analyze",
+        json={"scene_id": created["scene_id"], "question": services.GOLDEN_QUESTION},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Live model inference is unavailable."}
+    assert trace_store.records() == []
+
+
 def test_failed_storage_leaves_no_scene(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1179,6 +1300,7 @@ def test_invalid_cached_answer_fails_before_trace(
             "scene_id": services.GOLDEN_SCENE_ID,
             "question": services.GOLDEN_QUESTION,
             "sensor": "LoveDA",
+            "execution_mode": "cached_result",
         },
     )
 
@@ -1376,6 +1498,142 @@ def test_grounding_analysis_returns_normalized_bounding_box_evidence(
     assert trace_store.verify_chain()[0] is True
 
 
+def test_prepared_grounding_replays_exact_measured_artifact_without_live_inference(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        services,
+        "route",
+        lambda **_: pytest.fail("prepared grounding must not invoke live inference"),
+    )
+    request = {"scene_id": "dior-rsvg-07272", "question": "Locate a yellow ship.", "execution_mode": "cached_result"}
+
+    plan = client.post("/api/plan", json=request)
+    assert plan.status_code == 200
+    assert plan.json()["selected_capability"] == "grounding"
+    assert plan.json()["executable"] is True
+    assert trace_store.records() == []
+
+    response = client.post("/api/analyze", json=request)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["answer"] == "Found 1 match for 'A yellow ship'."
+    assert payload["evidence"] == [
+        {
+            "type": "bounding_box",
+            "label": "a yellow ship",
+            "coordinates": [
+                0.27768200635910034,
+                0.17724084854125977,
+                0.6881598830223083,
+                0.8173719644546509,
+            ],
+            "coordinate_space": "normalized_xyxy",
+            "confidence": 0.8577630519866943,
+            "source_scene_id": None,
+        }
+    ]
+    assert payload["execution_mode"] == "cached_result"
+    assert payload["results_artifact"] == (
+        "results/grounding-dino-swint__dior-rsvg__20260911T084941Z.json"
+    )
+    assert payload["model"] == {
+        "name": "grounding-dino-swint",
+        "version": "ShilongLiu/GroundingDINO:groundingdino_swint_ogc.pth",
+    }
+    assert "CACHED REAL" in payload["notice"]
+    assert "live model ran" in payload["notice"].lower()
+    assert "confidence" not in payload
+    assert len(trace_store.records()) == 1
+    assert payload["trace"]["params"]["execution_mode"] == "cached_result"
+    assert payload["trace"]["params"]["result_state"] == "cached_real"
+    assert payload["trace"]["params"]["scene_id"] == "dior-rsvg-07272"
+    assert payload["trace"]["params"]["source_scene_id"] == "JPEGImages/07272.jpg"
+    assert trace_store.verify_chain()[0] is True
+
+
+@pytest.mark.parametrize(
+    ("scene_id", "question"),
+    [
+        ("dior-rsvg-07272", "Locate a yellow ship"),
+        ("dior-rsvg-07272", "locate a yellow ship."),
+        (services.GOLDEN_SCENE_ID, "Locate a yellow ship."),
+    ],
+)
+def test_prepared_grounding_cache_requires_exact_scene_and_question(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    scene_id: str,
+    question: str,
+) -> None:
+    live_called = False
+
+    def unavailable_live_model(**_: object) -> dict:
+        nonlocal live_called
+        live_called = True
+        raise RuntimeError("Grounding DINO inference requires a CUDA GPU")
+
+    monkeypatch.setattr(services, "route", unavailable_live_model)
+    response = client.post(
+        "/api/analyze", json={"scene_id": scene_id, "question": question}
+    )
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Live model inference is unavailable."}
+    assert live_called is True
+    assert trace_store.records() == []
+
+
+@pytest.mark.parametrize("failure", ["missing", "malformed", "duplicate"])
+def test_prepared_grounding_invalid_artifact_fails_closed(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    artifact = json.loads(
+        (services.ROOT / "results/grounding-dino-swint__dior-rsvg__20260911T084941Z.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    row = next(item for item in artifact["results"] if item.get("test_index") == 12136)
+
+    if failure == "missing":
+        monkeypatch.setattr(
+            scene_pack,
+            "_artifact",
+            lambda _: (_ for _ in ()).throw(scene_pack.ScenePackError("missing")),
+        )
+    elif failure == "duplicate":
+        monkeypatch.setattr(
+            scene_pack,
+            "_artifact",
+            lambda _: (Path("artifact.json"), {"results": [row, dict(row)]}),
+        )
+    else:
+        malformed = json.loads(json.dumps(row))
+        malformed["prediction"]["evidence"] = []
+        malformed["selected_prediction"] = None
+        monkeypatch.setattr(
+            scene_pack,
+            "_artifact",
+            lambda _: (Path("artifact.json"), {"results": [malformed]}),
+        )
+    monkeypatch.setattr(
+        services,
+        "route",
+        lambda **_: pytest.fail("invalid cached artifact must not invoke live inference"),
+    )
+
+    response = client.post(
+        "/api/analyze",
+        json={"scene_id": "dior-rsvg-07272", "question": "Locate a yellow ship.", "execution_mode": "cached_result"},
+    )
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Required analysis artifacts are temporarily unavailable."
+    }
+    assert trace_store.records() == []
+
+
 @pytest.mark.parametrize("capability", ["change_vqa", "optical_sar"])
 def test_explicit_pair_capability_reports_missing_second_scene_first(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, capability: str
@@ -1537,7 +1795,7 @@ def test_sar_labeled_single_image_analysis_is_not_claimed_available(
     assert trace_store.records() == []
 
 
-def test_plan_endpoint_reports_vqa_without_model_or_trace(
+def test_plan_endpoint_reports_unmeasured_vqa_available_without_model_or_trace(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(

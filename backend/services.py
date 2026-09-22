@@ -24,6 +24,7 @@ from rasterio.io import MemoryFile
 from backend.scene_pack import (
     ScenePackError,
     cached_scene,
+    manifest as scene_pack_manifest,
     resolution_assets,
     scene_asset,
 )
@@ -178,8 +179,20 @@ class ModelExecutionError(RuntimeError):
 @lru_cache(maxsize=1)
 def load_results() -> dict[str, Any]:
     try:
-        return json.loads(RESULTS_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        data = RESULTS_PATH.read_bytes()
+        scene = next(
+            item
+            for item in scene_pack_manifest()["scenes"]
+            if item.get("source", {}).get("source_id") == GOLDEN_SCENE_ID
+        )
+        artifact = scene["artifact"]
+        if (
+            artifact.get("path") != RESULTS_RELATIVE_PATH
+            or artifact.get("sha256") != hashlib.sha256(data).hexdigest()
+        ):
+            raise ValueError
+        return json.loads(data)
+    except (KeyError, OSError, StopIteration, ValueError, json.JSONDecodeError) as exc:
         raise ArtifactError(f"Required resolution artifact is unavailable: {exc}") from exc
 
 
@@ -711,6 +724,27 @@ def _curated_cached_response(
     evidence = prediction.get("evidence")
     if not isinstance(answer, str) or not answer.strip() or not isinstance(evidence, list):
         raise ArtifactError("The curated cached result is malformed.")
+    if entry.get("capability") == "grounding":
+        box = evidence[0] if len(evidence) == 1 else None
+        coordinates = box.get("coordinates") if isinstance(box, dict) else None
+        confidence = box.get("confidence") if isinstance(box, dict) else None
+        if (
+            not isinstance(box, dict)
+            or box != row.get("selected_prediction")
+            or box.get("type") != "bounding_box"
+            or box.get("coordinate_space") != "normalized_xyxy"
+            or not isinstance(box.get("label"), str)
+            or not box["label"].strip()
+            or not isinstance(coordinates, list)
+            or len(coordinates) != 4
+            or any(not isinstance(value, (int, float)) or isinstance(value, bool) for value in coordinates)
+            or not (0 <= coordinates[0] < coordinates[2] <= 1)
+            or not (0 <= coordinates[1] < coordinates[3] <= 1)
+            or not isinstance(confidence, (int, float))
+            or isinstance(confidence, bool)
+            or not 0 <= confidence <= 1
+        ):
+            raise ArtifactError("The curated cached grounding evidence is malformed.")
     artifact = entry["artifact"]
     try:
         trace = append_record(
@@ -813,6 +847,7 @@ def analyze_scene(
     sensor: str | None,
     capability: str | None = None,
     scene_id_2: str | None = None,
+    execution_mode: str = "live",
 ) -> dict[str, Any]:
     question = question.strip()
     if not question:
@@ -841,31 +876,32 @@ def analyze_scene(
         raise CapabilityUnavailable(
             plan.unavailable_reason or "The selected capability cannot be executed."
         )
-    cached = None
-    if scene_id == GOLDEN_SCENE_ID and is_golden_eligible_plan(execution):
-        cached = find_cached_result(scene_id, question, plan.selected_capability)
-        if cached is None:
+    if execution_mode == "cached_result":
+        if scene_id == GOLDEN_SCENE_ID and is_golden_eligible_plan(execution):
+            cached = find_cached_result(scene_id, question, plan.selected_capability)
+            if cached is None:
+                raise AnalysisUnavailable(
+                    "No exact measured result matches this prepared scene and question. No answer was generated."
+                )
+            return _cached_response(cached, sensor, "explicit artifact replay", plan)
+        image_path = local_scene_image(scene_id)
+        if image_path is None:
             raise AnalysisUnavailable(
-                "No exact measured result matches this prepared scene and question. No answer was generated."
+                "No local scene pixels match this replay request. No answer was generated."
             )
-        return _cached_response(cached, sensor, "exact measured artifact match", plan)
-    image_path = local_scene_image(scene_id)
-    if image_path is None:
-        if cached is None:
-            raise AnalysisUnavailable(
-                "No local scene pixels or exact committed result match this scene and question. No answer was generated."
-            )
-        return _cached_response(
-            cached, sensor, "local scene pixels unavailable", plan
-        )
-
-    if INGESTED_SCENE_ID.fullmatch(scene_id):
         try:
             curated = cached_scene(image_path, question, plan.selected_capability)
         except ScenePackError as exc:
             raise ArtifactError("Curated cached result could not be verified.") from exc
-        if curated is not None:
-            return _curated_cached_response(curated, scene_id, sensor, plan)
+        if curated is None:
+            raise AnalysisUnavailable(
+                "No exact replay artifact matches this scene and question. No answer was generated."
+            )
+        return _curated_cached_response(curated, scene_id, sensor, plan)
+
+    image_path = local_scene_image(scene_id)
+    if image_path is None:
+        raise AnalysisUnavailable("No local scene pixels match this request. No answer was generated.")
 
     try:
         result = execute_plan(
@@ -888,10 +924,6 @@ def analyze_scene(
     except (CapabilityUnavailable, UnknownCapability):
         raise
     except ModelExecutionTimeout as exc:
-        if cached is not None:
-            return _cached_response(
-                cached, sensor, "model execution timed out", plan
-            )
         raise ModelUnavailable from exc
     except Exception as exc:
         unavailable = any(
@@ -904,11 +936,8 @@ def analyze_scene(
                 "checkpoint could not be loaded",
             )
         )
-        if cached is None:
-            error = ModelUnavailable if unavailable else ModelExecutionError
-            raise error from exc
-        reason = "no CUDA GPU" if unavailable else "model execution failed"
-        return _cached_response(cached, sensor, reason, plan)
+        error = ModelUnavailable if unavailable else ModelExecutionError
+        raise error from exc
 
 
 def _scene_ids(scene_id: str, scene_id_2: str | None) -> tuple[str, ...]:

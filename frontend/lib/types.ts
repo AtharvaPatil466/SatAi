@@ -5,6 +5,8 @@ export type OperationState = "IDLE" | "LOADING" | "SUCCESS" | "UNAVAILABLE" | "I
 export interface AnalysisRequest {
   scene_id: string;
   question: string;
+  /** Omitted requests run live; cached artifacts require explicit replay. */
+  execution_mode?: ExecutionMode;
   sensor?: string | null;
   capability?: string | null;
   /** Second scene for pairwise capabilities (change_vqa, optical_sar).

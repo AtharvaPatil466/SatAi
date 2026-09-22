@@ -10,6 +10,7 @@ MAX_QUESTION_LENGTH = 2000
 class AnalyzeRequest(BaseModel):
     scene_id: str = Field(min_length=1)
     question: str = Field(min_length=1, max_length=MAX_QUESTION_LENGTH)
+    execution_mode: Literal["live", "cached_result"] = "live"
     sensor: str | None = None
     capability: str | None = Field(
         default=None,

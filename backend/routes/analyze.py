@@ -92,6 +92,10 @@ def plan(request: AnalyzeRequest) -> PlanResponse:
         )
     except (InvalidPlanRequest, UnknownCapability) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ArtifactError as exc:
+        raise HTTPException(
+            status_code=503, detail="Required analysis artifacts are temporarily unavailable."
+        ) from exc
 
 
 @router.post(
@@ -106,6 +110,7 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
                 request.sensor,
                 request.capability,
                 request.scene_id_2,
+                request.execution_mode,
             )
         )
     except ArtifactError as exc:
