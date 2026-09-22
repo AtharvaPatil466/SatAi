@@ -10,6 +10,7 @@ from unittest.mock import patch
 from demo_gui import golden_assets
 from demo_gui.test_support import image_elements
 from models.qwen_vl.model import QwenVLModel
+from models.base import ModelReadiness
 from orchestrator import trace
 from PIL import Image
 from streamlit.testing.v1 import AppTest
@@ -45,6 +46,7 @@ class GoldenPathTests(unittest.TestCase):
                 golden_assets, "local_golden_image", return_value=self.golden_path
             ),
             patch.object(QwenVLModel, "_load", side_effect=RuntimeError(NO_GPU_ERROR)),
+            patch.object(QwenVLModel, "readiness", return_value=ModelReadiness(True)),
         ):
             app = AppTest.from_file(str(APP_PATH)).run(timeout=30)
             self.assertFalse(list(app.exception))
@@ -85,6 +87,7 @@ class GoldenPathTests(unittest.TestCase):
         with (
             patch.object(golden_assets, "local_golden_image", return_value=self.golden_path),
             patch.object(QwenVLModel, "infer", return_value={"answer": "Yes", "evidence": []}) as infer,
+            patch.object(QwenVLModel, "readiness", return_value=ModelReadiness(True)),
         ):
             app = AppTest.from_file(str(APP_PATH)).run(timeout=30)
             next(button for button in app.button if button.label == "Ask").click()
@@ -177,6 +180,7 @@ class GoldenPathTests(unittest.TestCase):
         with (
             patch("streamlit.file_uploader", return_value=uploaded),
             patch.object(QwenVLModel, "infer", side_effect=infer),
+            patch.object(QwenVLModel, "readiness", return_value=ModelReadiness(True)),
         ):
             app = AppTest.from_file(str(APP_PATH)).run(timeout=30)
             app.radio[0].set_value("Upload a scene").run(timeout=30)

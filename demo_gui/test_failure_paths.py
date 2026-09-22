@@ -12,6 +12,7 @@ from streamlit.testing.v1 import AppTest
 
 from demo_gui import golden_assets
 from models.qwen_vl.model import QwenVLModel
+from models.base import ModelReadiness
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_PATH = ROOT / "demo_gui/app.py"
@@ -66,6 +67,7 @@ class FailurePathTests(unittest.TestCase):
         with (
             patch.object(golden_assets, "local_golden_image", return_value=self.golden_path),
             patch.object(QwenVLModel, "_load", side_effect=RuntimeError(NO_GPU_ERROR)),
+            patch.object(QwenVLModel, "readiness", return_value=ModelReadiness(True)),
         ):
             app = self.ask(AppTest.from_file(str(APP_PATH)).run(timeout=30))
         text = self.assert_safe(app)
@@ -78,6 +80,7 @@ class FailurePathTests(unittest.TestCase):
         with (
             patch.object(golden_assets, "local_golden_image", return_value=self.golden_path),
             patch.object(QwenVLModel, "_load", side_effect=OSError(message)),
+            patch.object(QwenVLModel, "readiness", return_value=ModelReadiness(True)),
         ):
             app = self.ask(AppTest.from_file(str(APP_PATH)).run(timeout=30))
         text = self.assert_safe(app)
