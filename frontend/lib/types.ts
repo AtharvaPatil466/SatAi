@@ -22,6 +22,9 @@ export interface SceneUploadResponse {
   gsd: string | null;
   location: string | null;
   acquisition_date: string | null;
+  /** Legacy catalog fields; normal uploads do not report them. */
+  dataset?: string | null;
+  verified_pixels?: boolean;
 }
 
 export interface CatalogScene {

@@ -24,7 +24,6 @@ from rasterio.io import MemoryFile
 from backend.scene_pack import (
     ScenePackError,
     cached_scene,
-    identify_scene,
     resolution_assets,
     scene_asset,
 )
@@ -539,22 +538,7 @@ def ingest_scene(
             assert native_temporary is not None
             native_temporary.write_bytes(data)
         canonical.save(temporary, format="PNG")
-        try:
-            known_scene = identify_scene(temporary)
-        except ScenePackError:
-            known_scene = None
-        source_metadata = known_scene.get("source", {}) if known_scene else {}
-        provenance = {
-            field: "user_declared_upload"
-            for field in declared
-        }
-        if "sensor" not in declared and source_metadata.get("sensor") is not None:
-            provenance["sensor"] = "committed_scene_pack"
-        if (
-            "acquisition_timestamp" not in declared
-            and source_metadata.get("acquisition_date") is not None
-        ):
-            provenance["acquisition_timestamp"] = "committed_scene_pack"
+        provenance = {field: "user_declared_upload" for field in declared}
         manifest: SceneManifest = {
             "version": SCENE_MANIFEST_VERSION,
             "scene_id": scene_id,
@@ -579,12 +563,10 @@ def ingest_scene(
             },
             "raster": raster,
             "identity": {
-                "sensor": declared.get("sensor", source_metadata.get("sensor")),
+                "sensor": declared.get("sensor"),
                 "modality": declared.get("modality", "unknown"),
                 "acquisition_id": None,
-                "acquisition_time": declared.get(
-                    "acquisition_timestamp", source_metadata.get("acquisition_date")
-                ),
+                "acquisition_time": declared.get("acquisition_timestamp"),
                 "polarizations": declared.get("polarizations", []),
                 "benchmark_source": declared.get("benchmark_source"),
                 "provenance": provenance,
@@ -593,7 +575,7 @@ def ingest_scene(
                 "geographic_group": None,
                 "pair_group": declared.get("pair_group"),
                 "paired_scene_ids": [],
-                "original_split": source_metadata.get("dataset_split"),
+                "original_split": None,
                 "label_source": None,
             },
         }
@@ -622,19 +604,16 @@ def ingest_scene(
                 except OSError:
                     pass
 
-    source = known_scene.get("source", {}) if known_scene else {}
     return {
         "scene_id": scene_id,
         "filename": safe_filename,
         "format": detected_format,
         "width": width,
         "height": height,
-        "sensor": declared.get("sensor", source.get("sensor")),
-        "gsd": str(source["gsd"]) if source.get("gsd") is not None else None,
-        "location": source.get("location"),
-        "acquisition_date": declared.get(
-            "acquisition_timestamp", source.get("acquisition_date")
-        ),
+        "sensor": declared.get("sensor"),
+        "gsd": None,
+        "location": None,
+        "acquisition_date": declared.get("acquisition_timestamp"),
     }
 
 

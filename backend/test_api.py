@@ -454,6 +454,58 @@ def test_png_upload_returns_factual_metadata(client: TestClient) -> None:
     assert manifest["source"]["format"] == "PNG"
     assert manifest["raster"] is None
 
+def test_uploaded_pixels_never_become_prepared_scene_identity(
+    client: TestClient,
+) -> None:
+    asset = services.ROOT / services.GOLDEN_ASSET_RELATIVE_PATH
+    exact = asset.read_bytes()
+    uploaded = upload(client, "arbitrary-name.jpg", exact, content_type="image/jpeg")
+
+    assert uploaded.status_code == 201
+    scene_id = uploaded.json()["scene_id"]
+    assert re.fullmatch(r"scene_[0-9a-f]{32}", scene_id)
+    assert uploaded.json() == {
+        "scene_id": scene_id,
+        "filename": "arbitrary-name.jpg",
+        "format": "PNG",
+        "width": 1024,
+        "height": 1024,
+        "sensor": None,
+        "gsd": None,
+        "location": None,
+        "acquisition_date": None,
+    }
+    manifest = json.loads(
+        (services.SCENE_MANIFEST_DIR / f"{scene_id}.json").read_text()
+    )
+    assert manifest["identity"]["sensor"] is None
+    assert manifest["grouping"]["original_split"] is None
+    assert manifest["identity"]["provenance"] == {}
+
+    with Image.open(BytesIO(exact)) as image:
+        altered = image.convert("RGB")
+    red, green, blue = altered.getpixel((0, 0))
+    altered.putpixel((0, 0), ((red + 1) % 256, green, blue))
+    output = BytesIO()
+    altered.save(output, format="PNG")
+    altered.close()
+    changed = upload(
+        client,
+        "loveda_Train_Rural_images_png_0_gsd0.3.png",
+        output.getvalue(),
+        content_type="image/png",
+    )
+    assert re.fullmatch(r"scene_[0-9a-f]{32}", changed.json()["scene_id"])
+    assert changed.json()["gsd"] is None
+
+    arbitrary = upload(client, "loveda_Train_Rural_images_png_0_gsd0.3.png", image_bytes("PNG"))
+    assert arbitrary.status_code == 201
+    assert re.fullmatch(r"scene_[0-9a-f]{32}", arbitrary.json()["scene_id"])
+    assert arbitrary.json()["gsd"] is None
+    assert services.find_cached_result(
+        arbitrary.json()["scene_id"], services.GOLDEN_QUESTION, services.GOLDEN_CAPABILITY
+    ) is None
+
 
 def test_jpeg_upload_is_served_as_canonical_png(client: TestClient) -> None:
     response = upload(client, "satellite.jpg", image_bytes("JPEG"))
