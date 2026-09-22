@@ -5,6 +5,7 @@ from importlib.util import find_spec
 from typing import Any, Callable
 
 from models.base import Model, ModelReadiness
+from models.artifacts import validate_artifact
 
 
 class GroundingDINOModel(Model):
@@ -38,15 +39,9 @@ class GroundingDINOModel(Model):
         config = Path(groundingdino.__file__).resolve().parent / "config" / "GroundingDINO_SwinT_OGC.py"
         if not config.is_file():
             return ModelReadiness(False, "NOT_CONFIGURED", "Grounding DINO configuration is unavailable.")
-        from huggingface_hub import try_to_load_from_cache
-        try:
-            checkpoint = try_to_load_from_cache(
-                "ShilongLiu/GroundingDINO", "groundingdino_swint_ogc.pth"
-            )
-        except Exception:
-            checkpoint = None
-        if not isinstance(checkpoint, str) or not Path(checkpoint).is_file():
-            return ModelReadiness(False, "MODEL_UNAVAILABLE", "Grounding DINO checkpoint is not available locally.")
+        artifact = validate_artifact(self.name)
+        if not artifact.available:
+            return ModelReadiness(False, artifact.reason_code, artifact.detail)
         return ModelReadiness(True)
 
     def _load(self) -> None:
@@ -57,7 +52,6 @@ class GroundingDINOModel(Model):
             import groundingdino
             import torch
             from groundingdino.util.inference import load_image, load_model, predict
-            from huggingface_hub import hf_hub_download
         except ImportError as exc:
             raise RuntimeError(
                 "Grounding DINO inference requires groundingdino, torch, and huggingface-hub"
@@ -74,14 +68,12 @@ class GroundingDINOModel(Model):
         )
         if not config_path.is_file():
             raise RuntimeError("Grounding DINO Swin-T configuration is unavailable")
+        artifact = validate_artifact(self.name)
+        if not artifact.available or artifact.path is None:
+            raise RuntimeError(artifact.detail or "Grounding DINO artifact unavailable")
         try:
-            checkpoint_path = hf_hub_download(
-                repo_id="ShilongLiu/GroundingDINO",
-                filename="groundingdino_swint_ogc.pth",
-                local_files_only=True,
-            )
             self._model = load_model(
-                str(config_path), checkpoint_path, device="cuda"
+                str(config_path), str(artifact.path), device="cuda"
             )
         except Exception as exc:
             raise RuntimeError(

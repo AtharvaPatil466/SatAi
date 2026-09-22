@@ -111,4 +111,4 @@ def test_readiness_fails_closed_without_local_checkpoint(tmp_path, monkeypatch) 
     monkeypatch.setitem(sys.modules, "huggingface_hub", hub)
     readiness = GroundingDINOModel().readiness()
     assert readiness.available is False
-    assert readiness.reason_code == "MODEL_UNAVAILABLE"
+    assert readiness.reason_code == "ARTIFACT_UNAVAILABLE"

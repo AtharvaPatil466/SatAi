@@ -5,6 +5,7 @@ from importlib.util import find_spec
 from typing import Any
 
 from models.base import Model, ModelReadiness
+from models.artifacts import validate_artifact
 
 
 class QwenVLModel(Model):
@@ -27,23 +28,9 @@ class QwenVLModel(Model):
         import torch
         if not torch.cuda.is_available():
             return ModelReadiness(False, "CUDA_UNAVAILABLE", "A CUDA GPU is required for Qwen inference.")
-        from huggingface_hub import snapshot_download
-        try:
-            snapshot = Path(self.model_id)
-            if not snapshot.is_dir():
-                snapshot = Path(snapshot_download(self.model_id, local_files_only=True))
-            index = snapshot / "model.safetensors.index.json"
-            if index.is_file():
-                import json
-                shards = json.loads(index.read_text(encoding="utf-8"))["weight_map"].values()
-                weights_ready = all((snapshot / shard).is_file() for shard in shards)
-            else:
-                weights_ready = (snapshot / "model.safetensors").is_file() or (snapshot / "pytorch_model.bin").is_file()
-            files_ready = all((snapshot / name).is_file() for name in ("config.json", "preprocessor_config.json", "tokenizer_config.json"))
-            if not weights_ready or not files_ready:
-                raise FileNotFoundError
-        except Exception:
-            return ModelReadiness(False, "MODEL_UNAVAILABLE", "Qwen model files are not available locally.")
+        artifact = validate_artifact(self.name, model_id=self.model_id)
+        if not artifact.available:
+            return ModelReadiness(False, artifact.reason_code, artifact.detail)
         return ModelReadiness(True)
 
     def _load(self) -> None:
@@ -62,8 +49,11 @@ class QwenVLModel(Model):
             raise RuntimeError(
                 "Qwen2.5-VL inference requires a CUDA GPU for this baseline; use the Kaggle T4 runner"
             )
+        artifact = validate_artifact(self.name, model_id=self.model_id)
+        if not artifact.available or artifact.path is None:
+            raise RuntimeError(artifact.detail or "Qwen artifact unavailable")
         self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            self.model_id,
+            str(artifact.path),
             torch_dtype=torch.float16,
             device_map="auto",
             local_files_only=True,
@@ -71,7 +61,7 @@ class QwenVLModel(Model):
         self._model.eval()
         for parameter in self._model.parameters():
             parameter.requires_grad_(False)
-        self._processor = AutoProcessor.from_pretrained(self.model_id, local_files_only=True)
+        self._processor = AutoProcessor.from_pretrained(str(artifact.path), local_files_only=True)
         self._process_vision_info = process_vision_info
 
     def _generate_answer(self, image_paths: list[str], question: str) -> str:
