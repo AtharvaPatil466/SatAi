@@ -4,6 +4,7 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
+import models.grounding_dino.model as grounding_module
 from models.grounding_dino import GroundingDINOModel
 
 
@@ -75,3 +76,39 @@ def test_missing_cuda_fails_closed(monkeypatch) -> None:
 
     with pytest.raises(RuntimeError, match="requires a CUDA GPU"):
         GroundingDINOModel()._load()
+
+
+def test_readiness_fails_closed_without_dependency(monkeypatch) -> None:
+    monkeypatch.setattr(grounding_module, "find_spec", lambda name: None if name == "groundingdino" else object())
+    readiness = GroundingDINOModel().readiness()
+    assert readiness.available is False
+    assert readiness.reason_code == "DEPENDENCY_UNAVAILABLE"
+
+
+def test_readiness_fails_closed_without_cuda(monkeypatch) -> None:
+    monkeypatch.setattr(grounding_module, "find_spec", lambda _: object())
+    groundingdino = ModuleType("groundingdino")
+    groundingdino.__file__ = __file__
+    monkeypatch.setitem(sys.modules, "groundingdino", groundingdino)
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False)))
+    readiness = GroundingDINOModel().readiness()
+    assert readiness.available is False
+    assert readiness.reason_code == "CUDA_UNAVAILABLE"
+
+
+def test_readiness_fails_closed_without_local_checkpoint(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(grounding_module, "find_spec", lambda _: object())
+    package = tmp_path / "groundingdino"
+    config = package / "config" / "GroundingDINO_SwinT_OGC.py"
+    config.parent.mkdir(parents=True)
+    config.touch()
+    groundingdino = ModuleType("groundingdino")
+    groundingdino.__file__ = str(package / "__init__.py")
+    hub = ModuleType("huggingface_hub")
+    hub.try_to_load_from_cache = lambda *_args: None
+    monkeypatch.setitem(sys.modules, "groundingdino", groundingdino)
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: True)))
+    monkeypatch.setitem(sys.modules, "huggingface_hub", hub)
+    readiness = GroundingDINOModel().readiness()
+    assert readiness.available is False
+    assert readiness.reason_code == "MODEL_UNAVAILABLE"

@@ -1,9 +1,10 @@
 """Lazy, inference-only Qwen2.5-VL wrapper."""
 
 from pathlib import Path
+from importlib.util import find_spec
 from typing import Any
 
-from models.base import Model
+from models.base import Model, ModelReadiness
 
 
 class QwenVLModel(Model):
@@ -18,6 +19,32 @@ class QwenVLModel(Model):
         self._model: Any | None = None
         self._processor: Any | None = None
         self._process_vision_info: Any | None = None
+
+    def readiness(self) -> ModelReadiness:
+        for dependency in ("torch", "transformers", "qwen_vl_utils", "accelerate", "huggingface_hub"):
+            if find_spec(dependency) is None:
+                return ModelReadiness(False, "DEPENDENCY_UNAVAILABLE", f"Required dependency {dependency} is unavailable.")
+        import torch
+        if not torch.cuda.is_available():
+            return ModelReadiness(False, "CUDA_UNAVAILABLE", "A CUDA GPU is required for Qwen inference.")
+        from huggingface_hub import snapshot_download
+        try:
+            snapshot = Path(self.model_id)
+            if not snapshot.is_dir():
+                snapshot = Path(snapshot_download(self.model_id, local_files_only=True))
+            index = snapshot / "model.safetensors.index.json"
+            if index.is_file():
+                import json
+                shards = json.loads(index.read_text(encoding="utf-8"))["weight_map"].values()
+                weights_ready = all((snapshot / shard).is_file() for shard in shards)
+            else:
+                weights_ready = (snapshot / "model.safetensors").is_file() or (snapshot / "pytorch_model.bin").is_file()
+            files_ready = all((snapshot / name).is_file() for name in ("config.json", "preprocessor_config.json", "tokenizer_config.json"))
+            if not weights_ready or not files_ready:
+                raise FileNotFoundError
+        except Exception:
+            return ModelReadiness(False, "MODEL_UNAVAILABLE", "Qwen model files are not available locally.")
+        return ModelReadiness(True)
 
     def _load(self) -> None:
         """Load weights only on the first real inference call."""
@@ -39,11 +66,12 @@ class QwenVLModel(Model):
             self.model_id,
             torch_dtype=torch.float16,
             device_map="auto",
+            local_files_only=True,
         )
         self._model.eval()
         for parameter in self._model.parameters():
             parameter.requires_grad_(False)
-        self._processor = AutoProcessor.from_pretrained(self.model_id)
+        self._processor = AutoProcessor.from_pretrained(self.model_id, local_files_only=True)
         self._process_vision_info = process_vision_info
 
     def _generate_answer(self, image_paths: list[str], question: str) -> str:

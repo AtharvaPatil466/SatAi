@@ -1,9 +1,10 @@
 """Lazy Grounding DINO inference wrapper."""
 
 from pathlib import Path
+from importlib.util import find_spec
 from typing import Any, Callable
 
-from models.base import Model
+from models.base import Model, ModelReadiness
 
 
 class GroundingDINOModel(Model):
@@ -25,6 +26,28 @@ class GroundingDINOModel(Model):
         self._model: Any | None = None
         self._load_image: Callable[..., Any] | None = None
         self._predict_fn: Callable[..., Any] | None = None
+
+    def readiness(self) -> ModelReadiness:
+        for dependency in ("groundingdino", "torch", "huggingface_hub"):
+            if find_spec(dependency) is None:
+                return ModelReadiness(False, "DEPENDENCY_UNAVAILABLE", f"Required dependency {dependency} is unavailable.")
+        import groundingdino
+        import torch
+        if not torch.cuda.is_available():
+            return ModelReadiness(False, "CUDA_UNAVAILABLE", "A CUDA GPU is required for Grounding DINO.")
+        config = Path(groundingdino.__file__).resolve().parent / "config" / "GroundingDINO_SwinT_OGC.py"
+        if not config.is_file():
+            return ModelReadiness(False, "NOT_CONFIGURED", "Grounding DINO configuration is unavailable.")
+        from huggingface_hub import try_to_load_from_cache
+        try:
+            checkpoint = try_to_load_from_cache(
+                "ShilongLiu/GroundingDINO", "groundingdino_swint_ogc.pth"
+            )
+        except Exception:
+            checkpoint = None
+        if not isinstance(checkpoint, str) or not Path(checkpoint).is_file():
+            return ModelReadiness(False, "MODEL_UNAVAILABLE", "Grounding DINO checkpoint is not available locally.")
+        return ModelReadiness(True)
 
     def _load(self) -> None:
         """Load the package and checkpoint only on first real inference."""
@@ -55,6 +78,7 @@ class GroundingDINOModel(Model):
             checkpoint_path = hf_hub_download(
                 repo_id="ShilongLiu/GroundingDINO",
                 filename="groundingdino_swint_ogc.pth",
+                local_files_only=True,
             )
             self._model = load_model(
                 str(config_path), checkpoint_path, device="cuda"

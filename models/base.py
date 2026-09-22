@@ -1,6 +1,14 @@
 """Contract shared by every model used by the orchestrator."""
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class ModelReadiness:
+    available: bool
+    reason_code: str | None = None
+    detail: str | None = None
 
 
 class Model(ABC):
@@ -8,6 +16,10 @@ class Model(ABC):
 
     name: str = "base"
     version: str = "0.0.0"
+
+    def readiness(self) -> ModelReadiness:
+        """Report local prerequisites without loading weights or running inference."""
+        return ModelReadiness(False, "NOT_CONFIGURED", "Provider readiness is not configured.")
 
     @abstractmethod
     def infer(self, image_paths: list[str], question: str) -> dict:
