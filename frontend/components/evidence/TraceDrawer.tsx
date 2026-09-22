@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { ArrowDown, CheckCircle2, X } from "lucide-react";
 import type { TraceRecord, TraceVerification } from "@/lib/types";
 import { IntegrityBadge, type IntegrityState } from "./IntegrityBadge";
@@ -36,7 +37,7 @@ export function TraceDrawer({ trace, onVerify, verification, verifying = false, 
     <button type="button" onClick={() => setOpen(true)} className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-1 rounded border border-border bg-raised/35 px-3 py-2.5 text-left text-xs font-semibold text-slate-200 transition hover:border-accent/45 hover:text-white">
       <span>View execution</span><span className="flex items-center gap-2"><IntegrityBadge state={integrity} /><ArrowDown size={13} className="-rotate-90" /></span>
     </button>
-    {open && <div role="dialog" aria-modal="true" aria-labelledby="execution-title" className="fixed inset-0 z-50 flex justify-end bg-black/55" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
+    {open && createPortal(<div role="dialog" aria-modal="true" aria-labelledby="execution-title" className="fixed inset-0 z-50 flex justify-end bg-black/55" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
       <section className="h-full w-full max-w-md overflow-y-auto border-l border-border bg-[#08131c] shadow-2xl result-reveal">
         <header className="sticky top-0 z-10 flex items-start justify-between border-b border-border bg-[#08131c]/95 p-5">
           <div><p className="eyebrow">Execution provenance</p><h2 id="execution-title" className="mt-2 text-lg font-semibold text-white">Audit record</h2></div>
@@ -65,7 +66,7 @@ export function TraceDrawer({ trace, onVerify, verification, verifying = false, 
           <details className="border-t border-border pt-4"><summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">Technical record</summary><pre className="mt-3 max-h-72 overflow-auto rounded bg-background p-3 font-mono text-[9px] leading-4 text-slate-500">{JSON.stringify(trace, null, 2)}</pre></details>
         </div>
       </section>
-    </div>}
+    </div>, document.body)}
   </>;
 }
 

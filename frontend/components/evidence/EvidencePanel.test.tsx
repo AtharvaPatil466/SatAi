@@ -43,6 +43,19 @@ describe("EvidencePanel: execution provenance is never lost", () => {
     expect(screen.queryByText("Visual evidence")).toBeNull();
   });
 
+  it("portals the complete scrollable audit route outside animated workspace containment", () => {
+    render(<EvidencePanel trace={trace} />);
+    fireEvent.click(screen.getByRole("button", { name: /view execution/i }));
+
+    const dialog = screen.getByRole("dialog", { name: "Audit record" });
+    expect(dialog.parentElement).toBe(document.body);
+    expect(within(dialog).getByRole("list", { name: "Execution route" }).children).toHaveLength(6);
+    expect(within(dialog).getByText("Request")).toBeTruthy();
+    expect(within(dialog).getByText("Trace")).toBeTruthy();
+    expect(dialog.querySelector("section")?.classList.contains("overflow-y-auto")).toBe(true);
+    expect(dialog.querySelector("section")?.classList.contains("h-full")).toBe(true);
+  });
+
   it("keeps provenance visible alongside grounding evidence", () => {
     render(<EvidencePanel trace={trace} evidence={[boxRecord("building", [0.1, 0.2, 0.7, 0.8])]} />);
     expect(screen.getByText("Evidence")).toBeTruthy();
