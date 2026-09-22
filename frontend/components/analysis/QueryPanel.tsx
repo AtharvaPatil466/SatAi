@@ -1,13 +1,14 @@
 import { ArrowRight, LoaderCircle, Sparkles } from "lucide-react";
 
-export function QueryPanel({ question, onQuestion, phase, hasScene, onAnalyze }: {
+export function QueryPanel({ question, onQuestion, phase, hasScene, disabled = false, onAnalyze }: {
   question: string;
   onQuestion: (value: string) => void;
   phase: "READY" | "PLANNING" | "ANALYZING" | "SUCCESS" | "UNAVAILABLE" | "ERROR";
   hasScene: boolean;
+  disabled?: boolean;
   onAnalyze: () => void;
 }) {
-  const busy = phase === "PLANNING" || phase === "ANALYZING";
+  const busy = disabled || phase === "PLANNING" || phase === "ANALYZING";
   return <section className="border-t border-border bg-[#07121a] p-2.5">
     <form onSubmit={(event) => { event.preventDefault(); onAnalyze(); }} className="flex items-center gap-2 rounded border border-border bg-background/80 p-1.5 focus-within:border-accent/45">
       <Sparkles aria-hidden size={15} className="ml-2 shrink-0 text-accent/70" />
