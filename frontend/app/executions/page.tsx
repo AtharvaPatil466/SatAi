@@ -29,7 +29,7 @@ export default function ExecutionsPage() {
   const records = history ? [...history.records].reverse() : [];
   return <div className="space-y-5">
     <div className="flex flex-wrap items-end justify-between gap-4">
-      <div><p className="eyebrow">Execution history</p><h1 className="mt-2 text-3xl font-bold">Audit timeline</h1><p className="muted mt-2">Recorded facts only, ordered from the hash-chain genesis to the latest execution.</p></div>
+      <div><p className="eyebrow">Execution history</p><h1 className="mt-2 text-3xl font-bold">Audit timeline</h1><p className="muted mt-2">Recorded provenance ordered from hash-chain genesis to latest.</p></div>
       <div className={`rounded-full border px-3 py-1.5 text-xs font-bold ${verification?.verified ? "border-success/30 bg-success/10 text-success" : verification ? "border-error/30 bg-error/10 text-error" : "border-border text-slate-400"}`}>
         {verification ? (verification.verified ? "VERIFIED" : "FAILED") : "NOT YET VERIFIED"}
       </div>
@@ -50,23 +50,24 @@ export default function ExecutionsPage() {
 
 function TimelineRecord({ record, index, chainVerified }: { record: TraceRecord; index: number; chainVerified: boolean }) {
   const state = record.params.result_state === "cached_real" ? "cached_real" : resultStateFromExecution(record.params.execution_mode, record.params.results_artifact);
+  const recordedQuestion = record.input_summary?.question;
   const stages = [
-    ["REQUEST", record.input_summary.question],
-    ["PLANNER", record.params.planner_rule ? `${record.params.planner_rule}${record.params.planner_version ? ` · ${record.params.planner_version}` : ""}` : "NOT RECORDED"],
-    ["CAPABILITY", record.params.capability ?? "NOT RECORDED"],
-    ["PROVIDER", record.model_name || "NOT RECORDED"],
-    ["MODE", resultStateLabel(state)],
-    ["TRACE RECORD", shortHash(record.record_hash)],
+    { label: "REQUEST", value: typeof recordedQuestion === "string" && recordedQuestion.trim() ? recordedQuestion : "Request not recorded" },
+    { label: "PLANNER", value: record.params.planner_rule ? `${record.params.planner_rule}${record.params.planner_version ? ` · ${record.params.planner_version}` : ""}` : "NOT RECORDED" },
+    { label: "CAPABILITY", value: record.params.capability ?? "NOT RECORDED" },
+    { label: "PROVIDER", value: record.model_name || "NOT RECORDED" },
+    { label: "MODE", value: resultStateLabel(state) },
+    { label: "TRACE RECORD", value: shortHash(record.record_hash) },
   ];
   return <article className="panel overflow-hidden">
     <div className="border-b border-border p-4">
       <div className="flex flex-wrap items-center justify-between gap-3"><p className="font-mono text-xs text-slate-500">#{index} · {formatTimestamp(record.timestamp_iso)}</p><span className={chainVerified ? "text-xs font-bold text-success" : "text-xs text-slate-500"}>{chainVerified ? "CHAIN VERIFIED" : "RECORDED · UNVERIFIED"}</span></div>
       <ol aria-label={`Execution route ${index}`} className="mt-4 grid gap-2 lg:grid-cols-6">
-        {stages.map(([label, value], stage) => <li key={label} className="relative min-w-0 rounded-lg border border-border bg-raised/35 p-3">
+        {stages.map(({ label, value }, stage) => <li key={label} className="relative min-w-0 rounded-lg border border-border bg-raised/35 p-3">
           <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-slate-500">{label}</p><p className={`mt-2 break-words text-xs ${stage === 4 ? "font-bold text-accent" : "text-slate-200"}`}>{value}</p>
         </li>)}
       </ol>
-      <p className="mt-3 break-all font-mono text-[10px] text-slate-500">previous {record.prev_hash ? shortHash(record.prev_hash) : "GENESIS"} → record {shortHash(record.record_hash)}</p>
+      <p className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3 font-mono text-[10px]"><span className="uppercase tracking-[0.08em] text-slate-600">Previous</span><span className="break-all text-slate-300">{record.prev_hash ? shortHash(record.prev_hash) : "GENESIS"}</span><span aria-hidden className="text-accent">→</span><span className="uppercase tracking-[0.08em] text-slate-600">Record</span><span className="break-all text-slate-300">{shortHash(record.record_hash)}</span></p>
     </div>
     <details className="p-4"><summary className="cursor-pointer text-xs font-semibold text-accent">Inspect recorded provenance</summary><div className="mt-4"><EvidencePanel trace={record} /></div></details>
   </article>;
