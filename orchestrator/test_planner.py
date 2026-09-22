@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("ready_providers")
+
 from orchestrator.capabilities import (
     CHANGE_VQA,
     GROUNDING,

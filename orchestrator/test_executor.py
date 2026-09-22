@@ -4,6 +4,8 @@ from typing import Any
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("ready_providers")
+
 from orchestrator.capabilities import (
     GROUNDING,
     SINGLE_IMAGE_VQA,

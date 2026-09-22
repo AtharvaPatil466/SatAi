@@ -23,7 +23,7 @@ from backend.services import (
     plan_analysis,
 )
 from backend.scene_pack import ScenePackError, scene_catalog
-from orchestrator.capabilities import CapabilityUnavailable, UnknownCapability
+from orchestrator.capabilities import CapabilityUnavailable, ProviderNotReady, UnknownCapability
 from orchestrator.planner import InvalidPlanRequest
 from orchestrator.router import InvalidModelOutput, TracePersistenceError
 
@@ -123,6 +123,16 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
         raise HTTPException(status_code=422, detail=exc.result) from exc
     except UnknownCapability as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ProviderNotReady as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "capability": exc.capability,
+                "provider": exc.provider,
+                "reason_code": exc.reason_code,
+                "detail": exc.detail,
+            },
+        ) from exc
     except CapabilityUnavailable as exc:
         raise HTTPException(
             status_code=503,

@@ -54,8 +54,12 @@ export interface SceneCatalog { version: string; scenes: CatalogScene[] }
 
 export interface CapabilityStatus {
   name: string;
+  registered: boolean;
   available: boolean;
+  state: "AVAILABLE" | "UNAVAILABLE" | "NOT_IMPLEMENTED";
   provider: string | null;
+  reason_code: string | null;
+  detail: string | null;
 }
 
 export interface PlanResponse {

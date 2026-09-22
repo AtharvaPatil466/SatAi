@@ -305,9 +305,12 @@ def plan_request(request: PlanRequest) -> Plan:
         provider = None
         unavailable_reason = "No provider is registered for the selected capability."
     else:
-        provider_available = True
+        from orchestrator.capabilities import capability_readiness
+
+        readiness = capability_readiness(capability)
+        provider_available = bool(readiness["available"])
         provider = resolved.provider_name
-        unavailable_reason = None
+        unavailable_reason = None if provider_available else str(readiness["detail"])
 
     sensor = " ".join(_tokens(request.sensor or ""))
     if capability == SINGLE_IMAGE_VQA and sensor in {

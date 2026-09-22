@@ -36,7 +36,7 @@ export function CapabilityStatus({ compact = false }: { compact?: boolean }) {
     <div className="grid gap-3 xl:grid-cols-2">
       {CAPABILITIES.map(name => <CapabilityCard key={name} name={name} data={data} />)}
     </div>
-    <p className="text-xs leading-5 text-slate-400">REAL / LIVE requires reported runtime readiness. This API reports provider registration only, so runtime availability remains NOT REPORTED.</p>
+    <p className="text-xs leading-5 text-slate-400">Live availability comes from local provider readiness. Cached results and human validation are shown separately.</p>
   </section>;
 }
 
@@ -46,14 +46,12 @@ function CapabilityCard({ name, data }: { name: CapabilityName; data: LoadState 
   const cachedAvailable = cached?.some(scene => scene.available);
   const cachedUnavailable = cached?.find(scene => !scene.available)?.unavailable_reason;
   const prototype = name === "optical_sar" && data.sarPrototype === true;
-  const state = prototype ? "PROTOTYPE" : cachedAvailable ? "CACHED REAL" : capability?.available ? "PROVIDER REGISTERED" : capability ? "UNAVAILABLE" : data.capabilities ? "NOT REPORTED" : "UNKNOWN";
+  const state = capability?.state ?? (data.capabilities ? "NOT REPORTED" : "UNKNOWN");
   const unavailableReason = !data.capabilities
     ? "UNKNOWN"
     : !capability
       ? "NOT REPORTED"
-      : !capability.available
-        ? "No provider is registered for this capability."
-        : cachedUnavailable ? `Cached-real: ${cachedUnavailable}` : "NOT REPORTED";
+      : capability.detail ?? "None";
 
   return <article className="rounded-xl border border-border bg-raised/30 p-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -63,9 +61,10 @@ function CapabilityCard({ name, data }: { name: CapabilityName; data: LoadState 
     {prototype && <p className="mt-3 text-xs leading-5 text-warning">Human SAR validation is available. This is not AI model output.</p>}
     <dl className="mt-4 grid gap-3 sm:grid-cols-2">
       <Field label="Provider / model" value={capability ? capability.provider ?? "NOT REPORTED" : data.capabilities ? "NOT REPORTED" : "UNKNOWN"} />
-      <Field label="Provider registration" value={capability ? capability.available ? "YES" : "NO" : data.capabilities ? "NOT REPORTED" : "UNKNOWN"} />
-      <Field label="Runtime availability" value="NOT REPORTED" />
+      <Field label="Provider registration" value={capability ? capability.registered ? "YES" : "NO" : data.capabilities ? "NOT REPORTED" : "UNKNOWN"} />
+      <Field label="Runtime availability" value={capability ? capability.state : data.capabilities ? "NOT REPORTED" : "UNKNOWN"} />
       <Field label="Cached-real availability" value={cached ? cached.length ? cachedAvailable ? "CACHED REAL" : "UNAVAILABLE" : "NOT REPORTED" : "UNKNOWN"} />
+      {cachedUnavailable && <div className="sm:col-span-2"><Field label="Cached artifact" value={cachedUnavailable} /></div>}
       <div className="sm:col-span-2"><Field label="Unavailable reason" value={unavailableReason} /></div>
     </dl>
   </article>;
@@ -76,6 +75,6 @@ function Field({ label, value }: { label: string; value: string }) {
 }
 
 function Status({ value }: { value: string }) {
-  const tone = value === "CACHED REAL" ? "border-success/30 bg-success/10 text-success" : value === "PROVIDER REGISTERED" ? "border-accent/30 bg-accent/10 text-accent" : value === "PROTOTYPE" ? "border-warning/30 bg-warning/10 text-warning" : value === "UNAVAILABLE" ? "border-error/30 bg-error/10 text-error" : "border-border text-slate-400";
+  const tone = value === "AVAILABLE" ? "border-success/30 bg-success/10 text-success" : value === "UNAVAILABLE" ? "border-error/30 bg-error/10 text-error" : value === "NOT_IMPLEMENTED" ? "border-warning/30 bg-warning/10 text-warning" : "border-border text-slate-400";
   return <span className={`rounded-full border px-2.5 py-1 text-[10px] font-bold tracking-wide ${tone}`}>{value}</span>;
 }

@@ -11,10 +11,10 @@ describe("System status", () => {
   it("keeps registration, runtime, cache, and prototype states distinct", async () => {
     vi.stubGlobal("fetch", vi.fn((url: string) => {
       if (url.endsWith("/api/capabilities")) return response({ capabilities: [
-        { name: "single_image_vqa", available: true, provider: "qwen2.5vl-3b" },
-        { name: "grounding", available: true, provider: "grounding-dino-swint" },
-        { name: "change_vqa", available: false, provider: null },
-        { name: "optical_sar", available: false, provider: null },
+        { name: "single_image_vqa", registered: true, available: false, state: "UNAVAILABLE", provider: "qwen2.5vl-3b", reason_code: "CUDA_UNAVAILABLE", detail: "A CUDA GPU is required." },
+        { name: "grounding", registered: true, available: true, state: "AVAILABLE", provider: "grounding-dino-swint", reason_code: null, detail: null },
+        { name: "change_vqa", registered: false, available: false, state: "NOT_IMPLEMENTED", provider: null, reason_code: "NO_PROVIDER", detail: "No real provider is registered." },
+        { name: "optical_sar", registered: false, available: false, state: "NOT_IMPLEMENTED", provider: null, reason_code: "NO_PROVIDER", detail: "No real provider is registered." },
       ] });
       if (url.endsWith("/api/scenes")) return response({ version: "1.0", scenes: [
         { capability: "single_image_vqa", result_state: "cached_real", available: true },
@@ -25,12 +25,13 @@ describe("System status", () => {
 
     render(<CapabilityStatus />);
     const cards = await screen.findAllByRole("article");
-    expect(within(cards[0]).getAllByText("CACHED REAL")).toHaveLength(2);
-    expect(within(cards[0]).getAllByText("NOT REPORTED")).toHaveLength(2);
-    expect(within(cards[1]).getByText("PROVIDER REGISTERED")).toBeTruthy();
-    expect(within(cards[1]).getByText("Cached-real: Exact input is missing.")).toBeTruthy();
-    expect(within(cards[2]).getByText("UNAVAILABLE")).toBeTruthy();
-    expect(within(cards[3]).getByText("PROTOTYPE")).toBeTruthy();
+    expect(within(cards[0]).getAllByText("UNAVAILABLE")).toHaveLength(2);
+    expect(within(cards[0]).getByText("CACHED REAL")).toBeTruthy();
+    expect(within(cards[0]).getByText("A CUDA GPU is required.")).toBeTruthy();
+    expect(within(cards[1]).getAllByText("AVAILABLE")).toHaveLength(2);
+    expect(within(cards[1]).getByText("Exact input is missing.")).toBeTruthy();
+    expect(within(cards[2]).getAllByText("NOT_IMPLEMENTED")).toHaveLength(2);
+    expect(within(cards[3]).getAllByText("NOT_IMPLEMENTED")).toHaveLength(2);
     expect(within(cards[3]).getByText(/not AI model output/i)).toBeTruthy();
   });
 

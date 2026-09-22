@@ -30,6 +30,7 @@ from backend.scene_pack import (
 )
 from data.dataset import SCENE_MANIFEST_VERSION, SceneManifest, validate_scene_manifest
 from data.pairing import evaluate_compatibility
+from models.base import ModelReadiness
 
 # Keep model resolution offline before importing the model registry.
 os.environ["HF_HUB_OFFLINE"] = "1"
@@ -40,7 +41,9 @@ from orchestrator.capabilities import (  # noqa: E402
     CHANGE_VQA,
     OPTICAL_SAR,
     SINGLE_IMAGE_VQA,
+    ProviderNotReady,
     UnknownCapability,
+    capability_readiness,
 )
 from orchestrator.registry import get  # noqa: E402
 from orchestrator.planner import (  # noqa: E402
@@ -265,15 +268,10 @@ def normalize_scene_id(scene_id: str) -> str:
 
 
 def is_golden_eligible_plan(execution: ExecutionPlan) -> bool:
-    """Golden fallback applies only to a one-step single-image VQA plan.
-
-    Multi-step or unavailable-capability plans must never receive the exact
-    committed single-image VQA result, regardless of scene and question.
-    """
+    """Explicit golden replay applies only to a single-image VQA step."""
     return (
         len(execution.steps) == 1
         and execution.steps[0].capability == GOLDEN_CAPABILITY
-        and not execution.unavailable_capabilities
     )
 
 
@@ -841,6 +839,28 @@ def scene_compatibility(scene_id: str, scene_id_2: str, workflow: str) -> dict[s
     return evaluate_compatibility(manifests[0], manifests[1], workflow)
 
 
+def _record_unavailable(
+    capability: str, provider: str | None, reason_code: str, detail: str,
+    scene_ids: tuple[str, ...], question: str, sensor: str | None,
+) -> None:
+    """Record a failed live attempt without claiming that a model executed."""
+    try:
+        append_record({
+            "model_name": "not-executed",
+            "model_version": "not-executed",
+            "params": {
+                "execution_mode": "live", "result_state": "unavailable",
+                "capability": capability, "provider": provider,
+                "reason_code": reason_code, "detail": detail,
+                "scene_ids": list(scene_ids), "sensor": sensor,
+            },
+            "input_summary": {"image_paths": [], "question": question, "n_images": 0},
+            "timestamp_iso": datetime.now(timezone.utc).isoformat(),
+        })
+    except (TraceIntegrityError, OSError) as exc:
+        raise TracePersistenceError from exc
+
+
 def analyze_scene(
     scene_id: str,
     question: str,
@@ -872,11 +892,29 @@ def analyze_scene(
         )
         if not compatibility["eligible"]:
             raise PairCompatibilityError(compatibility)
-    if not plan.executable:
+    if not execution.executable and execution_mode == "live":
+        readiness = capability_readiness(plan.selected_capability)
+        if not readiness["available"]:
+            reason_code = str(readiness["reason_code"])
+            detail = str(readiness["detail"])
+            _record_unavailable(
+                plan.selected_capability, plan.provider, reason_code, detail,
+                _scene_ids(scene_id, scene_id_2), question, sensor,
+            )
+            raise ProviderNotReady(
+                plan.selected_capability, plan.provider,
+                ModelReadiness(False, reason_code, detail),
+            )
         raise CapabilityUnavailable(
             plan.unavailable_reason or "The selected capability cannot be executed."
         )
     if execution_mode == "cached_result":
+        if plan.provider is None or (
+            plan.unavailable_reason == "Single-image SAR interpretation is not currently supported."
+        ):
+            raise CapabilityUnavailable(
+                plan.unavailable_reason or "No provider is registered for the selected capability."
+            )
         if scene_id == GOLDEN_SCENE_ID and is_golden_eligible_plan(execution):
             cached = find_cached_result(scene_id, question, plan.selected_capability)
             if cached is None:
@@ -920,6 +958,12 @@ def analyze_scene(
     except TracePersistenceError:
         raise
     except InvalidModelOutput:
+        raise
+    except ProviderNotReady as exc:
+        _record_unavailable(
+            exc.capability, exc.provider, exc.reason_code, exc.detail,
+            _scene_ids(scene_id, scene_id_2), question, sensor,
+        )
         raise
     except (CapabilityUnavailable, UnknownCapability):
         raise
