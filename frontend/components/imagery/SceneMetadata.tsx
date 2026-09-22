@@ -1,29 +1,31 @@
 import type { CatalogScene, SceneUploadResponse } from "@/lib/types";
 
 const unknown = (value: string | number | null | undefined) => value === null || value === undefined || value === "" ? "Unknown" : String(value);
+const present = (items: [string, string | null | undefined][]) => items.filter((item): item is [string, string] => !!item[1]);
 
 export function SceneMetadata({ sceneId, upload, source }: {
   sceneId: string | null;
   upload: SceneUploadResponse | null;
   source?: CatalogScene["source"] | null;
 }) {
-  const compact = [
-    ["Source", source?.dataset],
+  const gsd = upload?.gsd ? (/\bm\b/i.test(upload.gsd) ? upload.gsd : `${upload.gsd} m`) : source?.gsd == null ? null : `${source.gsd} m`;
+  const compact = present([
+    ["Source", upload?.dataset ?? source?.dataset],
     ["Sensor", upload?.sensor ?? source?.sensor],
-    ["GSD", upload?.gsd ?? (source?.gsd == null ? null : `${source.gsd} m`)],
-  ];
-  const details = [
+    ["GSD", gsd],
+  ]);
+  const details = present([
     ["Scene ID", sceneId],
-    ["Dataset", source?.dataset],
+    ["Dataset", upload?.dataset ?? source?.dataset],
     ["Source ID", source?.source_id],
     ["Filename", upload?.filename],
     ["Format", upload?.format],
     ["Dimensions", upload ? `${upload.width} × ${upload.height}` : null],
     ["Sensor", upload?.sensor ?? source?.sensor],
-    ["GSD", upload?.gsd ?? (source?.gsd == null ? null : `${source.gsd} m`)],
+    ["GSD", gsd],
     ["Location", upload?.location ?? source?.location],
     ["Acquired", upload?.acquisition_date ?? source?.acquisition_date],
-  ];
+  ]);
   return (
     <div className="relative min-w-0">
       <div className="flex min-w-0 flex-wrap items-baseline gap-x-4 gap-y-1">
