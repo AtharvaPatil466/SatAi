@@ -17,7 +17,7 @@ export interface AnalysisRequest {
 export interface SceneUploadResponse {
   scene_id: string;
   filename: string;
-  format: "PNG" | "JPEG";
+  format: "PNG" | "JPEG" | "TIFF";
   width: number;
   height: number;
   sensor: string | null;
