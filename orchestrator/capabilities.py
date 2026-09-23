@@ -20,17 +20,20 @@ CHANGE_VQA = "change_vqa"
 OPTICAL_SAR = "optical_sar"
 
 # Capabilities with at least one registered provider.
-IMPLEMENTED_CAPABILITIES: frozenset[str] = frozenset({SINGLE_IMAGE_VQA})
+IMPLEMENTED_CAPABILITIES: frozenset[str] = frozenset({SINGLE_IMAGE_VQA, GROUNDING})
 
 # Capabilities on the roadmap: known vocabulary, no provider, never resolvable.
 UNAVAILABLE_CAPABILITIES: tuple[str, ...] = (
-    GROUNDING,
     CHANGE_VQA,
     OPTICAL_SAR,
 )
 
 # The full advertised vocabulary: implemented capabilities first.
-KNOWN_CAPABILITIES: tuple[str, ...] = (SINGLE_IMAGE_VQA, *UNAVAILABLE_CAPABILITIES)
+KNOWN_CAPABILITIES: tuple[str, ...] = (
+    SINGLE_IMAGE_VQA,
+    GROUNDING,
+    *UNAVAILABLE_CAPABILITIES,
+)
 
 
 class UnknownCapability(RuntimeError):
@@ -168,6 +171,15 @@ def register_default_providers() -> None:
             version=model.version,
             capabilities=frozenset({SINGLE_IMAGE_VQA}),
             model_name="qwen2.5vl-3b",
+        )
+    )
+    model = get("grounding-dino-swint")
+    register_provider(
+        Provider(
+            name=model.name,
+            version=model.version,
+            capabilities=frozenset({GROUNDING}),
+            model_name="grounding-dino-swint",
         )
     )
 

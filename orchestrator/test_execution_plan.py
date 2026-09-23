@@ -55,8 +55,8 @@ def test_ordinary_vqa_produces_one_step() -> None:
 def test_grounding_produces_one_grounding_step() -> None:
     execution = build("Where is the building?")
     assert [step.capability for step in execution.steps] == [GROUNDING]
-    assert execution.executable is False
-    assert execution.unavailable_capabilities == (GROUNDING,)
+    assert execution.executable is True
+    assert execution.unavailable_capabilities == ()
 
 
 def test_change_produces_one_change_vqa_step() -> None:
@@ -78,7 +78,7 @@ def test_temporal_plus_localization_produces_change_then_grounding_chain() -> No
         (GROUNDING, ("step_1",)),
     ]
     assert execution.executable is False
-    assert execution.unavailable_capabilities == (CHANGE_VQA, GROUNDING)
+    assert execution.unavailable_capabilities == (CHANGE_VQA,)
     assert execution.plan.rule_id == TEMPORAL_LOCALIZATION_RULE_ID
 
 

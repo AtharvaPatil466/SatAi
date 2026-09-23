@@ -23,10 +23,10 @@ class SceneUploadResponse(BaseModel):
     format: Literal["PNG", "JPEG"]
     width: int
     height: int
-    sensor: None = None
-    gsd: None = None
-    location: None = None
-    acquisition_date: None = None
+    sensor: str | None = None
+    gsd: str | None = None
+    location: str | None = None
+    acquisition_date: str | None = None
 
 
 class ModelInfo(BaseModel):
@@ -36,6 +36,7 @@ class ModelInfo(BaseModel):
 
 class AnalyzeResponse(BaseModel):
     answer: str
+    evidence: list[dict[str, Any]] | None = None
     execution_mode: Literal["live", "cached_result"]
     results_artifact: str | None = None
     model: ModelInfo

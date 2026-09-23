@@ -33,7 +33,9 @@ class CapabilityRegistryTests(unittest.TestCase):
             KNOWN_CAPABILITIES,
             (SINGLE_IMAGE_VQA, GROUNDING, CHANGE_VQA, OPTICAL_SAR),
         )
-        self.assertEqual(capabilities.IMPLEMENTED_CAPABILITIES, {SINGLE_IMAGE_VQA})
+        self.assertEqual(
+            capabilities.IMPLEMENTED_CAPABILITIES, {SINGLE_IMAGE_VQA, GROUNDING}
+        )
 
     def test_single_image_vqa_resolves_to_qwen_provider(self) -> None:
         resolved = resolve_provider(SINGLE_IMAGE_VQA)
@@ -44,6 +46,16 @@ class CapabilityRegistryTests(unittest.TestCase):
     def test_provider_metadata_is_truthful(self) -> None:
         resolved = resolve_provider(SINGLE_IMAGE_VQA)
         self.assertEqual(resolved.model_version, "Qwen/Qwen2.5-VL-3B-Instruct")
+
+    def test_grounding_resolves_to_grounding_dino_provider(self) -> None:
+        resolved = resolve_provider(GROUNDING)
+        self.assertEqual(resolved.capability, GROUNDING)
+        self.assertEqual(resolved.provider_name, "grounding-dino-swint")
+        self.assertEqual(resolved.model_name, "grounding-dino-swint")
+        self.assertEqual(
+            resolved.model_version,
+            "ShilongLiu/GroundingDINO:groundingdino_swint_ogc.pth",
+        )
 
     def test_unknown_capability_fails_clearly(self) -> None:
         with self.assertRaises(UnknownCapability):
@@ -75,12 +87,15 @@ class CapabilityRegistryTests(unittest.TestCase):
             Provider(
                 name="impostor",
                 version="0.0.1",
-                capabilities=frozenset({"grounding"}),
+                capabilities=frozenset({CHANGE_VQA}),
                 model_name="mock",
             )
         self.assertFalse(
-            any(entry["available"] for entry in capabilities.capabilities_status()
-                if entry["name"] == "grounding")
+            any(
+                entry["available"]
+                for entry in capabilities.capabilities_status()
+                if entry["name"] == CHANGE_VQA
+            )
         )
 
     def test_provider_rejects_empty_identity(self) -> None:
@@ -102,7 +117,7 @@ class CapabilityRegistryTests(unittest.TestCase):
             status,
             [
                 {"name": "single_image_vqa", "available": True, "provider": "qwen2.5vl-3b"},
-                {"name": "grounding", "available": False, "provider": None},
+                {"name": "grounding", "available": True, "provider": "grounding-dino-swint"},
                 {"name": "change_vqa", "available": False, "provider": None},
                 {"name": "optical_sar", "available": False, "provider": None},
             ],

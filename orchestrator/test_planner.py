@@ -69,9 +69,9 @@ def test_localization_questions_select_grounding(question: str) -> None:
     result = plan(question)
     assert result.selected_capability == GROUNDING
     assert result.rule_id == "grounding_spatial_localization"
-    assert result.provider_available is False
-    assert result.provider is None
-    assert result.executable is False
+    assert result.provider_available is True
+    assert result.provider == "grounding-dino-swint"
+    assert result.executable is True
 
 
 @pytest.mark.parametrize(

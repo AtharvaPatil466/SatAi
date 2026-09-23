@@ -336,7 +336,17 @@ def test_uploaded_scene_is_resolved_for_live_analysis(
     )
 
     assert response.status_code == 200
-    assert response.json()["answer"] == "uploaded scene analyzed"
+    payload = response.json()
+    assert set(payload) == {
+        "answer",
+        "execution_mode",
+        "results_artifact",
+        "model",
+        "trace",
+        "notice",
+    }
+    assert payload["answer"] == "uploaded scene analyzed"
+    assert payload["notice"] == "Live Qwen2.5-VL-3B inference completed."
     assert routed["image_paths"] == [
         str(services.INGESTED_SCENE_DIR / f"{created['scene_id']}.png")
     ]
@@ -715,7 +725,7 @@ def test_capabilities_endpoint_reports_truthful_availability(
     assert payload == {
         "capabilities": [
             {"name": "single_image_vqa", "available": True, "provider": "qwen2.5vl-3b"},
-            {"name": "grounding", "available": False, "provider": None},
+            {"name": "grounding", "available": True, "provider": "grounding-dino-swint"},
             {"name": "change_vqa", "available": False, "provider": None},
             {"name": "optical_sar", "available": False, "provider": None},
         ]
@@ -768,27 +778,46 @@ def test_unknown_capability_is_rejected_without_execution(
     assert trace_store.records() == []
 
 
-def test_unavailable_grounding_never_routes_to_vqa(
+def test_grounding_analysis_returns_normalized_bounding_box_evidence(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def fail(**_: object) -> dict:
-        raise AssertionError("model must not run")
+    created = upload(client, "scene.png", image_bytes("PNG")).json()
+    evidence = [
+        {
+            "type": "bounding_box",
+            "label": "building",
+            "coordinates": [0.1, 0.2, 0.7, 0.8],
+            "coordinate_space": "normalized_xyxy",
+            "confidence": 0.91,
+            "source_scene_id": None,
+        }
+    ]
+    model = SimpleNamespace(
+        version="test-grounding",
+        infer=lambda **_: {"answer": "Found 1 match.", "evidence": evidence},
+    )
 
-    monkeypatch.setattr(services, "route", fail)
-    monkeypatch.setattr(services, "find_cached_result", None)
+    monkeypatch.setattr(model_router, "get", lambda _: model)
     response = client.post(
         "/api/analyze",
         json={
-            "scene_id": services.GOLDEN_SCENE_ID,
-            "question": services.GOLDEN_QUESTION,
+            "scene_id": created["scene_id"],
+            "question": "Locate the building.",
             "capability": "grounding",
         },
     )
-    assert response.status_code == 503
-    assert response.json() == {
-        "detail": "Required capability is not currently available."
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["answer"] == "Found 1 match."
+    assert payload["evidence"] == evidence
+    assert payload["model"] == {
+        "name": "grounding-dino-swint",
+        "version": "test-grounding",
     }
-    assert trace_store.records() == []
+    assert payload["trace"]["params"]["capability"] == "grounding"
+    assert payload["trace"]["input_summary"]["question"] == "Locate the building."
+    assert len(trace_store.records()) == 1
+    assert trace_store.verify_chain()[0] is True
 
 
 @pytest.mark.parametrize("capability", ["change_vqa", "optical_sar"])
@@ -817,7 +846,7 @@ def test_golden_fallback_rejects_unsupported_capability(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def fail(**_: object) -> dict:
-        raise AssertionError("model must not run")
+        raise RuntimeError("Grounding DINO inference requires a CUDA GPU")
 
     monkeypatch.setattr(services, "route", fail)
     response = client.post(
@@ -829,29 +858,27 @@ def test_golden_fallback_rejects_unsupported_capability(
         },
     )
     assert response.status_code == 503
-    assert response.json() == {
-        "detail": "Required capability is not currently available."
-    }
+    assert response.json() == {"detail": "Live model inference is unavailable."}
     assert "showing the exact committed result" not in response.text
     assert trace_store.records() == []
 
 
-def test_inferred_grounding_is_unavailable_without_execution(
+def test_inferred_grounding_reports_model_unavailable_truthfully(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
         services,
         "route",
-        lambda **_: (_ for _ in ()).throw(AssertionError("model must not run")),
+        lambda **_: (_ for _ in ()).throw(
+            RuntimeError("Grounding DINO inference requires a CUDA GPU")
+        ),
     )
     response = client.post(
         "/api/analyze",
         json={"scene_id": services.GOLDEN_SCENE_ID, "question": "Where is the building?"},
     )
     assert response.status_code == 503
-    assert response.json() == {
-        "detail": "Required capability is not currently available."
-    }
+    assert response.json() == {"detail": "Live model inference is unavailable."}
     assert trace_store.records() == []
 
 
@@ -1011,8 +1038,8 @@ def test_plan_endpoint_reports_unavailable_and_missing_inputs(
     )
     assert grounding.status_code == 200
     assert grounding.json()["selected_capability"] == "grounding"
-    assert grounding.json()["provider_available"] is False
-    assert grounding.json()["executable"] is False
+    assert grounding.json()["provider_available"] is True
+    assert grounding.json()["executable"] is True
     assert change.status_code == 200
     assert change.json()["selected_capability"] == "change_vqa"
     assert change.json()["missing_inputs"] == ["second_scene"]
@@ -1048,7 +1075,7 @@ def test_plan_endpoint_rejects_unknown_capability(client: TestClient) -> None:
     assert trace_store.records() == []
 
 
-def test_plan_endpoint_reports_unavailable_grounding_step(
+def test_plan_endpoint_reports_available_grounding_step(
     client: TestClient,
 ) -> None:
     response = client.post(
@@ -1064,12 +1091,12 @@ def test_plan_endpoint_reports_unavailable_grounding_step(
             "capability": "grounding",
             "depends_on": [],
             "required_inputs": ["single_scene"],
-            "provider_available": False,
-            "provider": None,
+            "provider_available": True,
+            "provider": "grounding-dino-swint",
         }
     ]
-    assert payload["unavailable_capabilities"] == ["grounding"]
-    assert payload["executable"] is False
+    assert payload["unavailable_capabilities"] == []
+    assert payload["executable"] is True
 
 
 def test_plan_endpoint_reports_two_step_chain_for_temporal_localization(
@@ -1100,11 +1127,11 @@ def test_plan_endpoint_reports_two_step_chain_for_temporal_localization(
             "capability": "grounding",
             "depends_on": ["step_1"],
             "required_inputs": ["step_1.output"],
-            "provider_available": False,
-            "provider": None,
+            "provider_available": True,
+            "provider": "grounding-dino-swint",
         },
     ]
-    assert payload["unavailable_capabilities"] == ["change_vqa", "grounding"]
+    assert payload["unavailable_capabilities"] == ["change_vqa"]
     assert payload["executable"] is False
     assert trace_store.records() == []
 
@@ -1171,7 +1198,9 @@ def test_multi_step_plan_analyze_invokes_no_provider(
     monkeypatch.setattr(
         services,
         "route",
-        lambda **_: (_ for _ in ()).throw(AssertionError("model must not run")),
+        lambda **_: (_ for _ in ()).throw(
+            RuntimeError("Grounding DINO inference requires a CUDA GPU")
+        ),
     )
     response = client.post(
         "/api/analyze",
@@ -1194,7 +1223,9 @@ def test_multi_step_request_on_golden_scene_cannot_use_cache(
     monkeypatch.setattr(
         services,
         "route",
-        lambda **_: (_ for _ in ()).throw(AssertionError("model must not run")),
+        lambda **_: (_ for _ in ()).throw(
+            RuntimeError("Grounding DINO inference requires a CUDA GPU")
+        ),
     )
     response = client.post(
         "/api/analyze",

@@ -15,6 +15,8 @@ from uuid import uuid4
 
 from PIL import Image, UnidentifiedImageError
 
+from backend.scene_pack import ScenePackError, resolution_assets, scene_asset
+
 # Keep model resolution offline before importing the model registry.
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
@@ -133,6 +135,12 @@ def local_scene_image(scene_id: str) -> Path | None:
         return candidate if candidate.is_file() else None
     if "/" in scene_id or "\\" in scene_id or ".." in scene_id:
         return None
+    try:
+        catalog_asset = scene_asset(scene_id)
+    except ScenePackError:
+        catalog_asset = None
+    if catalog_asset is not None:
+        return catalog_asset
     normalized = normalize_scene_id(scene_id)
     if normalized != GOLDEN_SCENE_ID:
         return None
@@ -257,14 +265,21 @@ def _live_response(result: Any) -> dict[str, Any]:
     model_version = trace.get("model_version")
     if not isinstance(model_name, str) or not isinstance(model_version, str):
         raise InvalidModelOutput
-    return {
+    response = {
         "answer": answer.strip(),
         "execution_mode": "live",
         "results_artifact": None,
         "model": {"name": model_name, "version": model_version},
         "trace": dict(trace),
-        "notice": "Live Qwen2.5-VL-3B inference completed.",
+        "notice": (
+            "Live Qwen2.5-VL-3B inference completed."
+            if model_name == MODEL_NAME
+            else f"Live {model_name} inference completed."
+        ),
     }
+    if "evidence" in result:
+        response["evidence"] = result["evidence"]
+    return response
 
 
 def analyze_scene(
@@ -293,11 +308,11 @@ def analyze_scene(
         raise CapabilityUnavailable(
             plan.unavailable_reason or "The selected capability cannot be executed."
         )
-    if not is_golden_eligible_plan(execution):
-        raise CapabilityUnavailable(
-            "The planned execution requires capabilities that are not currently available."
-        )
-    cached = find_cached_result(scene_id, question, plan.selected_capability)
+    cached = (
+        find_cached_result(scene_id, question, plan.selected_capability)
+        if is_golden_eligible_plan(execution)
+        else None
+    )
     image_path = local_scene_image(scene_id)
     if image_path is None:
         if cached is None:
@@ -335,7 +350,16 @@ def analyze_scene(
             )
         raise ModelUnavailable from exc
     except Exception as exc:
-        unavailable = "CUDA GPU" in str(exc) or "requires transformers" in str(exc)
+        unavailable = any(
+            marker in str(exc)
+            for marker in (
+                "CUDA GPU",
+                "requires transformers",
+                "requires groundingdino",
+                "configuration is unavailable",
+                "checkpoint could not be loaded",
+            )
+        )
         if cached is None:
             error = ModelUnavailable if unavailable else ModelExecutionError
             raise error from exc
@@ -391,6 +415,10 @@ def capabilities_overview() -> dict[str, Any]:
 
 def resolution_report() -> dict[str, Any]:
     report = load_results()
+    try:
+        assets = resolution_assets()
+    except ScenePackError as exc:
+        raise ArtifactError("Resolution scene-pack manifest is invalid.") from exc
     return {
         "model": report["model"],
         "n_samples": report["n_samples"],
@@ -398,6 +426,7 @@ def resolution_report() -> dict[str, Any]:
         "provenance": report.get("provenance"),
         "per_rung": report["per_rung"],
         "degenerate_rungs": report["degenerate_rungs"],
+        "assets": assets,
     }
 
 

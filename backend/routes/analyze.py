@@ -21,6 +21,7 @@ from backend.services import (
     local_scene_image,
     plan_analysis,
 )
+from backend.scene_pack import ScenePackError, scene_catalog
 from orchestrator.capabilities import CapabilityUnavailable, UnknownCapability
 from orchestrator.planner import InvalidPlanRequest
 from orchestrator.router import InvalidModelOutput, TracePersistenceError
@@ -44,6 +45,14 @@ async def upload_scene(file: UploadFile = File(...)) -> SceneUploadResponse:
         raise HTTPException(status_code=500, detail="The uploaded image could not be stored.") from exc
 
 
+@router.get("/scenes")
+def scenes() -> dict:
+    try:
+        return scene_catalog()
+    except ScenePackError as exc:
+        raise HTTPException(status_code=503, detail="Curated scene pack is unavailable.") from exc
+
+
 @router.get("/capabilities", response_model=CapabilitiesResponse)
 def capabilities() -> CapabilitiesResponse:
     return CapabilitiesResponse.model_validate(capabilities_overview())
@@ -64,7 +73,9 @@ def plan(request: AnalyzeRequest) -> PlanResponse:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/analyze", response_model=AnalyzeResponse)
+@router.post(
+    "/analyze", response_model=AnalyzeResponse, response_model_exclude_unset=True
+)
 def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     try:
         return AnalyzeResponse.model_validate(
@@ -103,4 +114,5 @@ def scene_image(scene_id: str) -> FileResponse:
     image_path = local_scene_image(scene_id)
     if image_path is None:
         raise HTTPException(status_code=404, detail="Local scene pixels are unavailable.")
-    return FileResponse(image_path, media_type="image/png")
+    media_type = "image/jpeg" if image_path.suffix.lower() in {".jpg", ".jpeg"} else "image/png"
+    return FileResponse(image_path, media_type=media_type)

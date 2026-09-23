@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from orchestrator.capabilities import (
+    GROUNDING,
     SINGLE_IMAGE_VQA,
     CapabilityUnavailable,
 )
@@ -81,12 +82,16 @@ def test_executor_passes_correct_capability_and_plan_provenance() -> None:
     assert calls[0]["execution_step_count"] == 1
 
 
-def test_executor_does_not_execute_unavailable_grounding() -> None:
-    def route_fn(**_: Any) -> dict[str, Any]:
-        raise AssertionError("router must not run")
+def test_one_step_grounding_delegates_with_evidence() -> None:
+    calls: list[dict[str, Any]] = []
 
-    with pytest.raises(CapabilityUnavailable):
-        call(build("Where is the building?"), route_fn=route_fn)
+    def route_fn(**kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {"answer": "Found 1 match.", "evidence": [{"type": "bounding_box"}]}
+
+    result = call(build("Where is the building?"), route_fn=route_fn)
+    assert calls[0]["capability"] == GROUNDING
+    assert result["evidence"] == [{"type": "bounding_box"}]
 
 
 def test_executor_does_not_execute_unavailable_change_vqa() -> None:
@@ -112,6 +117,31 @@ def test_executor_does_not_execute_any_step_if_later_step_unavailable() -> None:
             build("Where did flooding increase?", scenes=("a", "b")),
             route_fn=route_fn,
         )
+    assert calls == []
+
+
+def test_executor_rejects_available_two_step_plan_before_execution() -> None:
+    calls: list[dict[str, Any]] = []
+    single = build("Is water visible?")
+    two_step = ExecutionPlan(
+        plan=single.plan,
+        execution_plan_version=single.execution_plan_version,
+        steps=(
+            single.steps[0],
+            PlanStep(
+                step_id="step_2",
+                capability=GROUNDING,
+                depends_on=("step_1",),
+                required_inputs=("step_1.output",),
+                provider_available=True,
+                provider="grounding-dino-swint",
+            ),
+        ),
+        unavailable_capabilities=(),
+    )
+
+    with pytest.raises(CapabilityUnavailable, match="single executable step"):
+        call(two_step, route_fn=lambda **kwargs: calls.append(kwargs) or {})
     assert calls == []
 
 
