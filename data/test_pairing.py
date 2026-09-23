@@ -127,9 +127,35 @@ def test_optical_sar_reports_required_grid_operation_without_performing_it() -> 
 
     result = evaluate_compatibility(optical, sar, "optical_sar")
 
-    assert result["eligible"] is True
+    assert result["eligible"] is False
     assert "resampling_or_co_registration" in result["operations_required"]
     assert "grid_alignment_differs" in codes(result)
+
+
+def test_optical_sar_rejects_different_crs() -> None:
+    optical = scene("a", modality="optical", acquired="2026-01-01T00:00:00+00:00")
+    sar = scene(
+        "b", modality="sar", acquired="2026-01-02T00:00:00+00:00",
+        polarization=["VV", "VH"], crs="EPSG:3857",
+    )
+
+    result = evaluate_compatibility(optical, sar, "optical_sar")
+
+    assert result["eligible"] is False
+    assert "reprojection_required" in codes(result)
+
+
+def test_optical_sar_rejects_different_dimensions() -> None:
+    optical = scene("a", modality="optical", acquired="2026-01-01T00:00:00+00:00")
+    sar = scene(
+        "b", modality="sar", acquired="2026-01-02T00:00:00+00:00",
+        polarization=["VV", "VH"], size=50,
+    )
+
+    result = evaluate_compatibility(optical, sar, "optical_sar")
+
+    assert result["eligible"] is False
+    assert "dimensions_incompatible" in codes(result)
 
 
 def test_compatible_bitemporal_pair() -> None:

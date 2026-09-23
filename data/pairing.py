@@ -224,17 +224,21 @@ def evaluate_compatibility(
         crs_differ = rasters[0]["crs_wkt"] != rasters[1]["crs_wkt"]
         if crs_differ:
             operations.append("reprojection")
-            target = failed if workflow == "change_vqa" else warnings
-            _issue(target, "reprojection_required", "CRS differs; pixel reprojection would be required before analysis.")
+            _issue(failed, "reprojection_required", "CRS differs; pixel reprojection would be required before analysis.")
         if workflow == "change_vqa":
             if not _aligned(first, second):
                 operations.append("co_registration_or_resampling")
                 _issue(failed, "grid_alignment_incompatible", "Bi-temporal pixel grids are not aligned.")
             else:
                 verified.append("grid_alignment_compatible")
-        elif rasters[0]["transform"] != rasters[1]["transform"]:
-            operations.append("resampling_or_co_registration")
-            _issue(warnings, "grid_alignment_differs", "Pixel grids differ; resampling or co-registration would be required.")
+        else:
+            if (rasters[0]["width"], rasters[0]["height"]) != (
+                rasters[1]["width"], rasters[1]["height"]
+            ):
+                _issue(failed, "dimensions_incompatible", "Optical and SAR raster dimensions differ.")
+            if rasters[0]["transform"] != rasters[1]["transform"]:
+                operations.append("resampling_or_co_registration")
+                _issue(failed, "grid_alignment_differs", "Pixel grids differ; resampling or co-registration would be required.")
 
     if all(date is not None for date in dates) and interval is None:
         interval = abs((dates[1] - dates[0]).total_seconds())

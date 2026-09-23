@@ -584,13 +584,13 @@ def test_incompatible_pair_returns_structured_result_without_model_dispatch(
     assert trace_store.records() == []
 
 
-def test_compatible_pair_reaches_existing_unavailable_provider_boundary(
+def test_compatible_pair_executes_joint_optical_sar_provider(
     client: TestClient,
 ) -> None:
     optical = upload(
         client,
         "optical.tif",
-        tiff_bytes(),
+        tiff_bytes(bands=5, dtype="float32"),
         {
             "modality": "multispectral",
             "sensor": "test-optical",
@@ -601,7 +601,7 @@ def test_compatible_pair_reaches_existing_unavailable_provider_boundary(
     sar = upload(
         client,
         "sar.tif",
-        tiff_bytes(),
+        tiff_bytes(bands=3, dtype="float32"),
         {
             "modality": "sar",
             "sensor": "test-sar",
@@ -621,17 +621,24 @@ def test_compatible_pair_reaches_existing_unavailable_provider_boundary(
         },
     )
 
-    assert response.status_code == 503
-    assert response.json()["detail"] == {
-        "capability": "optical_sar",
-        "provider": None,
-        "reason_code": "NO_PROVIDER",
-        "detail": "No real provider is registered for this capability.",
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["execution_mode"] == "live"
+    assert payload["results_artifact"] is None
+    assert payload["model"] == {
+        "name": "optical-sar-deterministic",
+        "version": "sentinel2-indices__sentinel1-backscatter-v1",
     }
+    assert [item["type"] for item in payload["evidence"]] == [
+        "optical_statistics", "sar_statistics", "joint_valid_coverage"
+    ]
+    assert payload["trace"]["input_summary"]["n_images"] == 2
+    assert payload["trace"]["params"]["input_modalities"] == ["optical", "sar"]
     records = trace_store.records()
     assert len(records) == 1
-    assert records[0]["params"]["result_state"] == "unavailable"
-    assert records[0]["params"]["reason_code"] == "NO_PROVIDER"
+    assert records[0]["model_name"] == "optical-sar-deterministic"
+    assert records[0]["input_summary"]["question"] == "Compare optical and SAR."
+    assert trace_store.verify_chain()[0] is True
 
 
 def test_scene_id_is_not_derived_from_malicious_filename(client: TestClient) -> None:
@@ -1153,7 +1160,7 @@ def test_capabilities_endpoint_reports_truthful_availability(
             {"name": "single_image_vqa", "registered": True, "available": True, "state": "AVAILABLE", "provider": "qwen2.5vl-3b", "reason_code": None, "detail": None},
             {"name": "grounding", "registered": True, "available": True, "state": "AVAILABLE", "provider": "grounding-dino-swint", "reason_code": None, "detail": None},
             {"name": "change_vqa", "registered": False, "available": False, "state": "NOT_IMPLEMENTED", "provider": None, "reason_code": "NO_PROVIDER", "detail": "No real provider is registered for this capability."},
-            {"name": "optical_sar", "registered": False, "available": False, "state": "NOT_IMPLEMENTED", "provider": None, "reason_code": "NO_PROVIDER", "detail": "No real provider is registered for this capability."},
+            {"name": "optical_sar", "registered": True, "available": True, "state": "AVAILABLE", "provider": "optical-sar-deterministic", "reason_code": None, "detail": None},
         ]
     }
 

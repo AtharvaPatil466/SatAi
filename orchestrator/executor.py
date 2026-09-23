@@ -22,7 +22,12 @@ RouteFn = Callable[..., dict[str, Any]]
 
 _SINGLE_STEP_ONLY = "Execution plan is not a supported single executable step."
 _REQUIRED_INPUTS = {
-    capability: ("single_scene",) for capability in IMPLEMENTED_CAPABILITIES
+    capability: (
+        ("optical_scene", "sar_scene")
+        if capability == "optical_sar"
+        else ("single_scene",)
+    )
+    for capability in IMPLEMENTED_CAPABILITIES
 }
 
 

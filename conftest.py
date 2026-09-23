@@ -4,6 +4,7 @@ import pytest
 
 from models.base import ModelReadiness
 from models.grounding_dino import GroundingDINOModel
+from models.optical_sar import OpticalSARModel
 from models.qwen_vl import QwenVLModel
 from orchestrator import trace
 
@@ -20,3 +21,4 @@ def ready_providers(monkeypatch):
     """Tests that exercise routing provide explicit ready model doubles."""
     monkeypatch.setattr(QwenVLModel, "readiness", lambda _: ModelReadiness(True))
     monkeypatch.setattr(GroundingDINOModel, "readiness", lambda _: ModelReadiness(True))
+    monkeypatch.setattr(OpticalSARModel, "readiness", lambda _: ModelReadiness(True))

@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from models.base import ModelReadiness
 from models.grounding_dino import GroundingDINOModel
+from models.optical_sar import OpticalSARModel
 from models.qwen_vl import QwenVLModel
 
 from orchestrator import capabilities
@@ -31,8 +32,10 @@ class CapabilityRegistryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.qwen_ready = patch.object(QwenVLModel, "readiness", lambda _: ModelReadiness(True))
         self.grounding_ready = patch.object(GroundingDINOModel, "readiness", lambda _: ModelReadiness(True))
+        self.optical_sar_ready = patch.object(OpticalSARModel, "readiness", lambda _: ModelReadiness(True))
         self.qwen_ready.start()
         self.grounding_ready.start()
+        self.optical_sar_ready.start()
         capabilities.reset_registry()
         capabilities.register_default_providers()
 
@@ -40,6 +43,7 @@ class CapabilityRegistryTests(unittest.TestCase):
         capabilities.reset_registry()
         capabilities.register_default_providers()
         self.grounding_ready.stop()
+        self.optical_sar_ready.stop()
         self.qwen_ready.stop()
 
     def test_known_vocabulary_matches_spec(self) -> None:
@@ -48,7 +52,8 @@ class CapabilityRegistryTests(unittest.TestCase):
             (SINGLE_IMAGE_VQA, GROUNDING, CHANGE_VQA, OPTICAL_SAR),
         )
         self.assertEqual(
-            capabilities.IMPLEMENTED_CAPABILITIES, {SINGLE_IMAGE_VQA, GROUNDING}
+            capabilities.IMPLEMENTED_CAPABILITIES,
+            {SINGLE_IMAGE_VQA, GROUNDING, OPTICAL_SAR},
         )
 
     def test_single_image_vqa_resolves_to_qwen_provider(self) -> None:
@@ -69,6 +74,15 @@ class CapabilityRegistryTests(unittest.TestCase):
         self.assertEqual(
             resolved.model_version,
             "ShilongLiu/GroundingDINO:groundingdino_swint_ogc.pth",
+        )
+
+    def test_optical_sar_resolves_to_deterministic_provider(self) -> None:
+        resolved = resolve_provider(OPTICAL_SAR)
+        self.assertEqual(resolved.provider_name, "optical-sar-deterministic")
+        self.assertEqual(resolved.model_name, "optical-sar-deterministic")
+        self.assertEqual(
+            resolved.model_version,
+            "sentinel2-indices__sentinel1-backscatter-v1",
         )
 
     def test_unknown_capability_fails_clearly(self) -> None:
@@ -133,7 +147,7 @@ class CapabilityRegistryTests(unittest.TestCase):
                 {"name": "single_image_vqa", "registered": True, "available": True, "state": "AVAILABLE", "provider": "qwen2.5vl-3b", "reason_code": None, "detail": None},
                 {"name": "grounding", "registered": True, "available": True, "state": "AVAILABLE", "provider": "grounding-dino-swint", "reason_code": None, "detail": None},
                 {"name": "change_vqa", "registered": False, "available": False, "state": "NOT_IMPLEMENTED", "provider": None, "reason_code": "NO_PROVIDER", "detail": "No real provider is registered for this capability."},
-                {"name": "optical_sar", "registered": False, "available": False, "state": "NOT_IMPLEMENTED", "provider": None, "reason_code": "NO_PROVIDER", "detail": "No real provider is registered for this capability."},
+                {"name": "optical_sar", "registered": True, "available": True, "state": "AVAILABLE", "provider": "optical-sar-deterministic", "reason_code": None, "detail": None},
             ],
         )
         status.clear()

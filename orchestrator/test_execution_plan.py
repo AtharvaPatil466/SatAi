@@ -70,7 +70,7 @@ def test_change_produces_one_change_vqa_step() -> None:
 def test_optical_sar_produces_one_optical_sar_step() -> None:
     execution = build("Compare the optical and SAR images.", scenes=("a", "b"))
     assert [step.capability for step in execution.steps] == [OPTICAL_SAR]
-    assert execution.executable is False
+    assert execution.executable is True
 
 
 def test_temporal_plus_localization_produces_change_then_grounding_chain() -> None:
