@@ -1,6 +1,6 @@
 # Pair compatibility validation handoff
 
-Status: implemented and locally verified on 2026-09-18. This validates eligibility only; it does not implement optical-SAR fusion or change analysis.
+Status: implemented and locally verified on 2026-09-18. This layer validates eligibility only; deterministic optical-SAR and change providers are documented separately.
 
 ## Contract
 
@@ -45,7 +45,7 @@ Supported polarization declarations are `VV`, `VH`, `HH`, and `HV`. Callers of t
 | `reprojection_required` | CRS differs, so the pair fails closed. |
 | `dimensions_incompatible` | Raster dimensions differ. |
 | `grid_alignment_incompatible` | Bi-temporal grids are not aligned. |
-| `grid_alignment_differs` | Optical-SAR grids differ and later processing would need resampling/co-registration; warning only. |
+| `grid_alignment_differs` | Optical-SAR grids differ, so the pair fails closed because resampling/co-registration would be required. |
 
 ## Evidence
 
@@ -75,6 +75,6 @@ The warnings are from generated Rasterio fixtures: ten `PendingDeprecationWarnin
 - Trusted footprints or valid-data polygons, nodata masks, and inspected co-registration evidence.
 - Reference maps with dates, semantics, provenance, licensing, and review status.
 - Independent geographic groups plus untouched model-selection, calibration, and final-test groups.
-- Real fusion/change providers and checkpoints evaluated under those manifests.
+- Held-out evaluation data for the deterministic providers and any future learned fusion/change checkpoints.
 
 The committed SAR PNG renders and manual interpretations remain presentation evidence only and cannot satisfy these requirements.
