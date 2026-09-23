@@ -55,21 +55,6 @@ def _resolution(bounds: tuple[float, ...], manifest: SceneManifest) -> float:
     return sqrt(area / (raster["width"] * raster["height"]))
 
 
-def _aligned(left: SceneManifest, right: SceneManifest, tolerance: float = 0.25) -> bool:
-    first, second = left["raster"], right["raster"]
-    assert first is not None and second is not None
-    if first["crs_wkt"] != second["crs_wkt"]:
-        return False
-    a, b = first["transform"], second["transform"]
-    if any(abs(a[index] - b[index]) > 1e-9 for index in (0, 1, 3, 4)):
-        return False
-    if not a[0] or not a[4]:
-        return False
-    column_offset = (b[2] - a[2]) / a[0]
-    row_offset = (b[5] - a[5]) / a[4]
-    return all(abs(value - round(value)) <= tolerance for value in (column_offset, row_offset))
-
-
 def evaluate_compatibility(
     first: SceneManifest,
     second: SceneManifest | None,
@@ -226,10 +211,17 @@ def evaluate_compatibility(
             operations.append("reprojection")
             _issue(failed, "reprojection_required", "CRS differs; pixel reprojection would be required before analysis.")
         if workflow == "change_vqa":
-            if not _aligned(first, second):
+            if (rasters[0]["width"], rasters[0]["height"]) != (
+                rasters[1]["width"], rasters[1]["height"]
+            ):
+                _issue(failed, "dimensions_incompatible", "T1 and T2 raster dimensions differ.")
+            if rasters[0]["transform"] != rasters[1]["transform"]:
                 operations.append("co_registration_or_resampling")
                 _issue(failed, "grid_alignment_incompatible", "Bi-temporal pixel grids are not aligned.")
-            else:
+            if not any(
+                item["code"] in {"reprojection_required", "dimensions_incompatible", "grid_alignment_incompatible"}
+                for item in failed
+            ):
                 verified.append("grid_alignment_compatible")
         else:
             if (rasters[0]["width"], rasters[0]["height"]) != (

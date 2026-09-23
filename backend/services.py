@@ -861,6 +861,27 @@ def _optical_sar_paths(scene_ids: tuple[str, str]) -> list[str]:
     return [ordered["optical"], ordered["sar"]]
 
 
+def _change_inputs(scene_ids: tuple[str, str]) -> tuple[list[str], list[str]]:
+    paths: list[str] = []
+    timestamps: list[str] = []
+    for scene_id in scene_ids:
+        manifest, _ = _manifest_for_scene(scene_id)
+        if manifest is None:
+            raise AnalysisUnavailable("Both T1 and T2 manifests are required.")
+        native_path = manifest["source"].get("native_path")
+        path = (
+            INGESTED_RASTER_DIR / f"{scene_id}.tif"
+            if isinstance(native_path, str)
+            else None
+        )
+        timestamp = manifest["identity"].get("acquisition_time")
+        if path is None or not path.is_file() or not isinstance(timestamp, str):
+            raise AnalysisUnavailable("Both T1 and T2 native rasters and timestamps are required.")
+        paths.append(str(path))
+        timestamps.append(timestamp)
+    return paths, timestamps
+
+
 def _record_unavailable(
     capability: str, provider: str | None, reason_code: str, detail: str,
     scene_ids: tuple[str, ...], question: str, sensor: str | None,
@@ -962,11 +983,24 @@ def analyze_scene(
     if plan.selected_capability == OPTICAL_SAR:
         assert scene_id_2 is not None
         image_paths = _optical_sar_paths((scene_id, scene_id_2))
+        pair_params = {
+            "scene_id_2": normalize_scene_id(scene_id_2),
+            "input_modalities": ["optical", "sar"],
+        }
+    elif plan.selected_capability == CHANGE_VQA:
+        assert scene_id_2 is not None
+        image_paths, timestamps = _change_inputs((scene_id, scene_id_2))
+        pair_params = {
+            "scene_id_2": normalize_scene_id(scene_id_2),
+            "temporal_order": ["t1", "t2"],
+            "acquisition_times": timestamps,
+        }
     else:
         image_path = local_scene_image(scene_id)
         if image_path is None:
             raise AnalysisUnavailable("No local scene pixels match this request. No answer was generated.")
         image_paths = [str(image_path)]
+        pair_params = {}
 
     try:
         result = execute_plan(
@@ -976,14 +1010,7 @@ def analyze_scene(
             question=question,
             base_params={
                 "scene_id": normalize_scene_id(scene_id),
-                **(
-                    {
-                        "scene_id_2": normalize_scene_id(scene_id_2),
-                        "input_modalities": ["optical", "sar"],
-                    }
-                    if plan.selected_capability == OPTICAL_SAR
-                    else {}
-                ),
+                **pair_params,
                 "sensor": sensor,
                 "execution_mode": "live",
             },

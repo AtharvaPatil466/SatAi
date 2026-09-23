@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from models.base import ModelReadiness
+from models.change import ChangeModel
 from models.grounding_dino import GroundingDINOModel
 from models.optical_sar import OpticalSARModel
 from models.qwen_vl import QwenVLModel
@@ -33,9 +34,11 @@ class CapabilityRegistryTests(unittest.TestCase):
         self.qwen_ready = patch.object(QwenVLModel, "readiness", lambda _: ModelReadiness(True))
         self.grounding_ready = patch.object(GroundingDINOModel, "readiness", lambda _: ModelReadiness(True))
         self.optical_sar_ready = patch.object(OpticalSARModel, "readiness", lambda _: ModelReadiness(True))
+        self.change_ready = patch.object(ChangeModel, "readiness", lambda _: ModelReadiness(True))
         self.qwen_ready.start()
         self.grounding_ready.start()
         self.optical_sar_ready.start()
+        self.change_ready.start()
         capabilities.reset_registry()
         capabilities.register_default_providers()
 
@@ -44,6 +47,7 @@ class CapabilityRegistryTests(unittest.TestCase):
         capabilities.register_default_providers()
         self.grounding_ready.stop()
         self.optical_sar_ready.stop()
+        self.change_ready.stop()
         self.qwen_ready.stop()
 
     def test_known_vocabulary_matches_spec(self) -> None:
@@ -53,7 +57,7 @@ class CapabilityRegistryTests(unittest.TestCase):
         )
         self.assertEqual(
             capabilities.IMPLEMENTED_CAPABILITIES,
-            {SINGLE_IMAGE_VQA, GROUNDING, OPTICAL_SAR},
+            {SINGLE_IMAGE_VQA, GROUNDING, CHANGE_VQA, OPTICAL_SAR},
         )
 
     def test_single_image_vqa_resolves_to_qwen_provider(self) -> None:
@@ -85,6 +89,12 @@ class CapabilityRegistryTests(unittest.TestCase):
             "sentinel2-indices__sentinel1-backscatter-v1",
         )
 
+    def test_change_resolves_to_deterministic_provider(self) -> None:
+        resolved = resolve_provider(CHANGE_VQA)
+        self.assertEqual(resolved.provider_name, "change-deterministic")
+        self.assertEqual(resolved.model_name, "change-deterministic")
+        self.assertEqual(resolved.model_version, "bitemporal-difference-v1")
+
     def test_unknown_capability_fails_clearly(self) -> None:
         with self.assertRaises(UnknownCapability):
             resolve_provider("time_travel")
@@ -110,21 +120,14 @@ class CapabilityRegistryTests(unittest.TestCase):
         capabilities.register_default_providers()
         self.assertEqual(resolve_provider(SINGLE_IMAGE_VQA), original)
 
-    def test_provider_cannot_advertise_unimplemented_capability(self) -> None:
+    def test_provider_cannot_advertise_unknown_capability(self) -> None:
         with self.assertRaises(ValueError):
             Provider(
                 name="impostor",
                 version="0.0.1",
-                capabilities=frozenset({CHANGE_VQA}),
+                capabilities=frozenset({"time_travel"}),
                 model_name="mock",
             )
-        self.assertFalse(
-            any(
-                entry["available"]
-                for entry in capabilities.capabilities_status()
-                if entry["name"] == CHANGE_VQA
-            )
-        )
 
     def test_provider_rejects_empty_identity(self) -> None:
         for kwargs in (
@@ -146,7 +149,7 @@ class CapabilityRegistryTests(unittest.TestCase):
             [
                 {"name": "single_image_vqa", "registered": True, "available": True, "state": "AVAILABLE", "provider": "qwen2.5vl-3b", "reason_code": None, "detail": None},
                 {"name": "grounding", "registered": True, "available": True, "state": "AVAILABLE", "provider": "grounding-dino-swint", "reason_code": None, "detail": None},
-                {"name": "change_vqa", "registered": False, "available": False, "state": "NOT_IMPLEMENTED", "provider": None, "reason_code": "NO_PROVIDER", "detail": "No real provider is registered for this capability."},
+                {"name": "change_vqa", "registered": True, "available": True, "state": "AVAILABLE", "provider": "change-deterministic", "reason_code": None, "detail": None},
                 {"name": "optical_sar", "registered": True, "available": True, "state": "AVAILABLE", "provider": "optical-sar-deterministic", "reason_code": None, "detail": None},
             ],
         )

@@ -25,6 +25,8 @@ _REQUIRED_INPUTS = {
     capability: (
         ("optical_scene", "sar_scene")
         if capability == "optical_sar"
+        else ("scene_pair",)
+        if capability == "change_vqa"
         else ("single_scene",)
     )
     for capability in IMPLEMENTED_CAPABILITIES

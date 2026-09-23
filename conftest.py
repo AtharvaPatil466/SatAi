@@ -3,6 +3,7 @@
 import pytest
 
 from models.base import ModelReadiness
+from models.change import ChangeModel
 from models.grounding_dino import GroundingDINOModel
 from models.optical_sar import OpticalSARModel
 from models.qwen_vl import QwenVLModel
@@ -22,3 +23,4 @@ def ready_providers(monkeypatch):
     monkeypatch.setattr(QwenVLModel, "readiness", lambda _: ModelReadiness(True))
     monkeypatch.setattr(GroundingDINOModel, "readiness", lambda _: ModelReadiness(True))
     monkeypatch.setattr(OpticalSARModel, "readiness", lambda _: ModelReadiness(True))
+    monkeypatch.setattr(ChangeModel, "readiness", lambda _: ModelReadiness(True))

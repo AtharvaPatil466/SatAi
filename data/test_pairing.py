@@ -169,6 +169,31 @@ def test_compatible_bitemporal_pair() -> None:
     assert "grid_alignment_compatible" in result["verified_checks"]
 
 
+def test_bitemporal_dimensions_must_match() -> None:
+    first = scene("a", modality="optical", acquired="2026-01-01T00:00:00+00:00")
+    second = scene(
+        "b", modality="optical", acquired="2026-01-02T00:00:00+00:00", size=50
+    )
+
+    result = evaluate_compatibility(first, second, "change_vqa")
+
+    assert result["eligible"] is False
+    assert "dimensions_incompatible" in codes(result)
+
+
+def test_bitemporal_affine_grids_must_match_exactly() -> None:
+    first = scene("a", modality="optical", acquired="2026-01-01T00:00:00+00:00")
+    second = scene(
+        "b", modality="optical", acquired="2026-01-02T00:00:00+00:00",
+        origin=(500010.0, 2000000.0),
+    )
+
+    result = evaluate_compatibility(first, second, "change_vqa")
+
+    assert result["eligible"] is False
+    assert "grid_alignment_incompatible" in codes(result)
+
+
 def test_missing_crs_fails_closed() -> None:
     first = scene("a", modality="optical", acquired="2026-01-01T00:00:00+00:00", crs=None, georeferencing_status="missing_crs")
     second = scene("b", modality="optical", acquired="2026-01-02T00:00:00+00:00")
