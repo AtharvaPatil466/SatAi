@@ -91,6 +91,10 @@ class AnalysisUnavailable(RuntimeError):
     """Raised when neither live inference nor an exact cached result is available."""
 
 
+class SceneNotFound(LookupError):
+    """Raised when requested local scene pixels do not exist."""
+
+
 class InvalidImageUpload(ValueError):
     """Raised when uploaded bytes are not a supported safe image."""
 
@@ -714,6 +718,12 @@ def analyze_scene(
         )
         if not compatibility["eligible"]:
             raise PairCompatibilityError(compatibility)
+    if (
+        execution_mode == "live"
+        and plan.selected_capability not in {OPTICAL_SAR, CHANGE_VQA}
+        and local_scene_image(scene_id) is None
+    ):
+        raise SceneNotFound("Local scene pixels are unavailable.")
     if not execution.executable and execution_mode == "live":
         readiness = capability_readiness(plan.selected_capability)
         if not readiness["available"]:
@@ -771,9 +781,7 @@ def analyze_scene(
     else:
         image_path = local_scene_image(scene_id)
         if image_path is None:
-            raise AnalysisUnavailable(
-                "No local scene pixels match this request. No answer was generated."
-            )
+            raise SceneNotFound("Local scene pixels are unavailable.")
         image_paths = [str(image_path)]
         pair_params = {}
 

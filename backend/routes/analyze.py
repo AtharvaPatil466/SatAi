@@ -16,6 +16,7 @@ from backend.services import (
     ModelUnavailable,
     PairCompatibilityError,
     SceneStorageError,
+    SceneNotFound,
     analyze_scene,
     capabilities_overview,
     ingest_scene,
@@ -113,6 +114,8 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
         raise HTTPException(
             status_code=503, detail="Required analysis artifacts are temporarily unavailable."
         ) from exc
+    except SceneNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (AnalysisUnavailable, InvalidPlanRequest) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except PairCompatibilityError as exc:

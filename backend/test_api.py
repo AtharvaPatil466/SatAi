@@ -780,6 +780,26 @@ def test_unsafe_scene_ids_return_404(client: TestClient, scene_id: str) -> None:
     assert "/etc/passwd" not in response.text
 
 
+def test_missing_scene_returns_404_before_provider_readiness(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        QwenVLModel,
+        "readiness",
+        lambda _: ModelReadiness(False, "CUDA_UNAVAILABLE", "private runtime detail"),
+    )
+
+    response = client.post(
+        "/api/analyze",
+        json={"scene_id": "scene_missing", "question": "What is visible?"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Local scene pixels are unavailable."}
+    assert "private runtime detail" not in response.text
+    assert trace_store.records() == []
+
+
 def test_uploaded_scene_is_resolved_for_live_analysis(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

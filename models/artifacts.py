@@ -75,7 +75,7 @@ def validate_artifact(provider: str, *, model_id: str | None = None) -> Artifact
         elif path.name != spec["checkpoint"]:
             return ArtifactStatus(False, "ARTIFACT_CONFIG_INVALID", "Grounding DINO checkpoint filename differs from manifest.")
         elif not path.is_file() or path.stat().st_size == 0:
-            return ArtifactStatus(False, "ARTIFACT_UNAVAILABLE", f"Grounding DINO checkpoint missing: {path}.")
+            return ArtifactStatus(False, "ARTIFACT_UNAVAILABLE", "Grounding DINO checkpoint is unavailable; configure SATQUERY_GROUNDING_CHECKPOINT.")
         return ArtifactStatus(True, path=path.resolve(), identity=f"{spec['model_id']}@{spec['revision'] or 'unverified-revision'}")
     except (KeyError, TypeError, ValueError) as exc:
         return ArtifactStatus(False, "ARTIFACT_CONFIG_INVALID", str(exc))

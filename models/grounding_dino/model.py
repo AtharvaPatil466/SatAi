@@ -65,8 +65,13 @@ class GroundingDINOModel(Model):
             return ModelReadiness(False, "CUDA_UNAVAILABLE", "A CUDA GPU is required for Grounding DINO.")
         try:
             self._resolve_config()
-        except (ImportError, OSError) as exc:
-            return ModelReadiness(False, "NOT_CONFIGURED", str(exc))
+        except (ImportError, OSError):
+            return ModelReadiness(
+                False,
+                "NOT_CONFIGURED",
+                "Grounding DINO configuration is unavailable; set "
+                "SATQUERY_GROUNDING_CONFIG or install the packaged configuration.",
+            )
         artifact = validate_artifact(self.name)
         if not artifact.available:
             return ModelReadiness(False, artifact.reason_code, artifact.detail)

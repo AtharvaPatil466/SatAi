@@ -43,5 +43,6 @@ def test_grounding_explicit_checkpoint(tmp_path, monkeypatch) -> None:
     checkpoint = tmp_path / "groundingdino_swint_ogc.pth"
     monkeypatch.setenv("SATQUERY_GROUNDING_CHECKPOINT", str(checkpoint))
     assert artifacts.validate_artifact("grounding-dino-swint").reason_code == "ARTIFACT_UNAVAILABLE"
+    assert str(tmp_path) not in (artifacts.validate_artifact("grounding-dino-swint").detail or "")
     checkpoint.write_bytes(b"weights")
     assert artifacts.validate_artifact("grounding-dino-swint").path == checkpoint

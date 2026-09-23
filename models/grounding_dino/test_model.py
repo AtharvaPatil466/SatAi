@@ -157,7 +157,11 @@ def test_missing_explicit_config_fails_readiness(tmp_path, monkeypatch) -> None:
 
     assert readiness.available is False
     assert readiness.reason_code == "NOT_CONFIGURED"
-    assert "missing.py" in readiness.detail
+    assert readiness.detail == (
+        "Grounding DINO configuration is unavailable; set "
+        "SATQUERY_GROUNDING_CONFIG or install the packaged configuration."
+    )
+    assert str(tmp_path) not in readiness.detail
 
 
 def test_readiness_and_load_use_same_resolved_config(tmp_path, monkeypatch) -> None:
