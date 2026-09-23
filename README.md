@@ -6,6 +6,8 @@ conditions: [verification report](docs/PHASE0_VERIFICATION.md).
 
 Contract-first scaffold for a multi-agent geospatial visual-question-answering system on Python 3.11 (recorded in `.python-version`). Install with `pip3 install -r requirements.txt`; if `rasterio` fails to install on macOS, omit it for the MVP demo because none of the scaffolded paths require it.
 
+GPU provider execution status: Qwen2.5-VL-3B-Instruct and Grounding DINO Swin-T both completed the repository's live, uncached smoke path on a Kaggle Tesla T4 at commit `ad9cbdb`. This verifies runtime execution and output contracts, not model accuracy or benchmark performance. See [the GPU smoke record](docs/gpu-smoke.md#verified-kaggle-t4-run).
+
 ## Folders and invariants
 
 `configs/` contains one YAML file per experiment. Every config must keep the common fields in `example.yaml` so training and smoke-test entry points remain interchangeable.

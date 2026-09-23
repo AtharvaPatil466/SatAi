@@ -8,6 +8,19 @@ This is operational verification of one live inference per provider. It is not a
 
 The repository has **no verified model revision or weight checksum** for either artifact. The manifest records both as `null`. File completeness confirms that the providers can locate the files; it cannot prove weight provenance. Supply trusted artifacts separately and keep weights outside Git. The default Kaggle paths are `/kaggle/input/satquery-models/qwen2.5-vl-3b-instruct` and `/kaggle/input/satquery-models/groundingdino_swint_ogc.pth`. Set `SATQUERY_QWEN_MODEL_DIR` and `SATQUERY_GROUNDING_CHECKPOINT` to use other exact local paths. When neither path is set nor the default exists, the existing Hugging Face cache is checked with local-only lookup. A specified missing path fails closed without falling back.
 
+## Verified Kaggle T4 run
+
+The official `python scripts/gpu_smoke.py` runner completed with exit code `0` on a Kaggle Tesla T4 at commit `ad9cbdb42c20d01b9d45eaddd6903dae101c1188`. The generated report was `/kaggle/working/satquery-gpu-smoke.json`.
+
+Runtime: PyTorch `2.10.0+cu128`, Transformers `4.49.0`, Accelerate `1.13.0`, qwen-vl-utils `0.0.14`, groundingdino-py `0.4.0`, and huggingface-hub `0.36.2`. CUDA was available.
+
+| Provider | Mode | Success | Latency | Structural result | Failure |
+|---|---|---:|---:|---|---|
+| Qwen2.5-VL-3B-Instruct | `live` | true | 34.384 s | nonempty answer; 0 evidence items | null |
+| Grounding DINO Swin-T | `live` | true | 19.224 s | nonempty answer; 1 evidence item | null |
+
+This run verifies real CUDA provider initialization, inference, and SatQuery output validation for both providers. It is one operational smoke sample per provider and makes no accuracy, quality, throughput, or benchmark claim. Artifact revision and SHA-256 fields remain `null` because they were not independently verified.
+
 ## GPU prerequisite and command
 
 Use a Kaggle T4 or other CUDA NVIDIA runtime with this repository and its committed `data/demo` assets mounted. Before the offline run, install compatible CUDA PyTorch, `transformers==4.49.0`, `qwen-vl-utils`, `accelerate`, `huggingface-hub`, and `groundingdino-py==0.4.0`. These are the versions and packages used by the existing Kaggle evaluation runners; the report records the actual installed versions. Provision the two model artifacts at the paths above. Package installation and artifact provisioning are separate setup steps; they are never attempted by the smoke command.
