@@ -7,6 +7,7 @@ import pytest
 pytestmark = pytest.mark.usefixtures("ready_providers")
 
 from orchestrator.capabilities import (
+    CHANGE_VQA,
     GROUNDING,
     SINGLE_IMAGE_VQA,
     CapabilityUnavailable,
@@ -96,25 +97,30 @@ def test_one_step_grounding_delegates_with_evidence() -> None:
     assert result["evidence"] == [{"type": "bounding_box"}]
 
 
-def test_executor_does_not_execute_unavailable_change_vqa() -> None:
-    def route_fn(**_: Any) -> dict[str, Any]:
-        raise AssertionError("router must not run")
+def test_executor_delegates_change_vqa() -> None:
+    calls: list[dict[str, Any]] = []
 
-    with pytest.raises(CapabilityUnavailable):
-        call(
-            build("What changed between these images?", scenes=("a", "b")),
-            route_fn=route_fn,
-        )
+    def route_fn(**kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {"answer": "Change summary", "evidence": [{"type": "change_statistics"}]}
+
+    result = call(
+        build("What changed between these images?", scenes=("a", "b")),
+        route_fn=route_fn,
+    )
+
+    assert calls[0]["capability"] == CHANGE_VQA
+    assert result["evidence"] == [{"type": "change_statistics"}]
 
 
-def test_executor_does_not_execute_any_step_if_later_step_unavailable() -> None:
+def test_executor_rejects_planned_two_step_change_chain() -> None:
     calls: list[dict[str, Any]] = []
 
     def route_fn(**kwargs: Any) -> dict[str, Any]:
         calls.append(kwargs)
         return {"answer": "Yes", "trace": {"params": {}}}
 
-    with pytest.raises(CapabilityUnavailable):
+    with pytest.raises(CapabilityUnavailable, match="single executable step"):
         call(
             build("Where did flooding increase?", scenes=("a", "b")),
             route_fn=route_fn,

@@ -15,14 +15,14 @@ Compatibility results contain:
 - `acquisition_interval_seconds` when both timestamps are valid
 - `operations_required` and unique `reason_codes`
 
-An incompatible `optical_sar` or `change_vqa` request returns HTTP 422 with this result under `detail`. Validation runs before provider resolution or model dispatch. A compatible request continues to the existing provider boundary; because neither provider exists, it still returns the truthful 503 capability-unavailable response.
+An incompatible `optical_sar` or `change_vqa` request returns HTTP 422 with this result under `detail`. Validation runs before provider resolution or model dispatch. Compatible requests continue to their registered deterministic provider.
 
 ## Defaults
 
 | Workflow | Minimum normalized overlap | Maximum resolution ratio | Additional requirements |
 |---|---:|---:|---|
 | `optical_sar` | 0.80 | 4.00 | One declared optical/multispectral scene, one SAR scene, supported SAR polarization, both sensors and timestamps declared |
-| `change_vqa` | 0.90 | 1.25 | Compatible declared modality family, ordered timestamps, same CRS, affine grids aligned within 0.25 pixel |
+| `change_vqa` | 0.90 | 1.25 | Compatible declared modality family, ordered timestamps, same dimensions, same CRS, and exactly identical affine grid |
 
 Supported polarization declarations are `VV`, `VH`, `HH`, and `HV`. Callers of the pure evaluator may override overlap and resolution thresholds explicitly. No request can cause pixel reprojection, resampling, or co-registration.
 
@@ -42,7 +42,8 @@ Supported polarization declarations are `VV`, `VH`, `HH`, and `HV`. Callers of t
 | `georeferencing_model_unsupported` | GCP/RPC metadata is preserved but not pair-ready. |
 | `footprint_transform_failed` | Bounds cannot be safely transformed for comparison. |
 | `overlap_below_threshold`, `resolution_ratio_exceeded` | Measured compatibility falls outside the workflow defaults. |
-| `reprojection_required` | CRS differs; this is a warning for optical-SAR and a failure for bi-temporal analysis. |
+| `reprojection_required` | CRS differs, so the pair fails closed. |
+| `dimensions_incompatible` | Raster dimensions differ. |
 | `grid_alignment_incompatible` | Bi-temporal grids are not aligned. |
 | `grid_alignment_differs` | Optical-SAR grids differ and later processing would need resampling/co-registration; warning only. |
 
@@ -65,7 +66,7 @@ The warnings are from generated Rasterio fixtures: ten `PendingDeprecationWarnin
 - Resolution is an equal-area approximation suitable for gating, not a sensor-physics measurement.
 - GCP/RPC-only rasters fail closed until explicit footprint/grid support is implemented.
 - Validation reports required operations but never performs them.
-- Compatibility does not prove either unavailable model can use the paired information.
+- Compatibility establishes pair eligibility; provider evidence separately records whether both inputs contributed.
 
 ## Native data still required
 

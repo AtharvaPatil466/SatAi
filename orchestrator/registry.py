@@ -1,6 +1,7 @@
 """Registry of model instances addressable by stable names."""
 
 from models.base import Model
+from models.change import ChangeModel
 from models.grounding_dino import GroundingDINOModel
 from models.mock import MockModel
 from models.optical_sar import OpticalSARModel
@@ -31,3 +32,4 @@ register("mock", MockModel())
 register("qwen2.5vl-3b", QwenVLModel())
 register("grounding-dino-swint", GroundingDINOModel())
 register("optical-sar-deterministic", OpticalSARModel())
+register("change-deterministic", ChangeModel())

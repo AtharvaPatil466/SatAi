@@ -64,7 +64,7 @@ def test_grounding_produces_one_grounding_step() -> None:
 def test_change_produces_one_change_vqa_step() -> None:
     execution = build("What changed between these images?", scenes=("a", "b"))
     assert [step.capability for step in execution.steps] == [CHANGE_VQA]
-    assert execution.executable is False
+    assert execution.executable is True
 
 
 def test_optical_sar_produces_one_optical_sar_step() -> None:
@@ -79,8 +79,8 @@ def test_temporal_plus_localization_produces_change_then_grounding_chain() -> No
         (CHANGE_VQA, ()),
         (GROUNDING, ("step_1",)),
     ]
-    assert execution.executable is False
-    assert execution.unavailable_capabilities == (CHANGE_VQA,)
+    assert execution.executable is True
+    assert execution.unavailable_capabilities == ()
     assert execution.plan.rule_id == TEMPORAL_LOCALIZATION_RULE_ID
 
 

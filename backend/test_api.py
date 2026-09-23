@@ -641,6 +641,62 @@ def test_compatible_pair_executes_joint_optical_sar_provider(
     assert trace_store.verify_chain()[0] is True
 
 
+def test_compatible_bitemporal_pair_executes_change_provider(
+    client: TestClient,
+) -> None:
+    before = upload(
+        client,
+        "before.tif",
+        tiff_bytes(bands=3, dtype="float32"),
+        {
+            "modality": "optical",
+            "sensor": "test-rgb",
+            "acquisition_timestamp": "2026-01-01T00:00:00Z",
+            "pair_group": "change-pair-1",
+        },
+    ).json()["scene_id"]
+    after = upload(
+        client,
+        "after.tif",
+        tiff_bytes(bands=3, dtype="float32"),
+        {
+            "modality": "optical",
+            "sensor": "test-rgb",
+            "acquisition_timestamp": "2026-01-02T00:00:00Z",
+            "pair_group": "change-pair-1",
+        },
+    ).json()["scene_id"]
+
+    response = client.post(
+        "/api/analyze",
+        json={
+            "scene_id": before,
+            "scene_id_2": after,
+            "question": "Did built-up area increase?",
+            "capability": "change_vqa",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["model"] == {
+        "name": "change-deterministic",
+        "version": "bitemporal-difference-v1",
+    }
+    assert "confidence" not in payload
+    assert "does not infer semantic change classes" in payload["answer"]
+    assert [item["type"] for item in payload["evidence"]] == [
+        "temporal_inputs", "change_statistics", "temporal_valid_coverage"
+    ]
+    assert payload["trace"]["input_summary"]["n_images"] == 2
+    assert payload["trace"]["params"]["temporal_order"] == ["t1", "t2"]
+    assert payload["trace"]["params"]["acquisition_times"] == [
+        "2026-01-01T00:00:00+00:00", "2026-01-02T00:00:00+00:00"
+    ]
+    assert trace_store.records()[0]["model_name"] == "change-deterministic"
+    assert trace_store.verify_chain()[0] is True
+
+
 def test_scene_id_is_not_derived_from_malicious_filename(client: TestClient) -> None:
     response = upload(client, "../../owned.png", image_bytes("PNG"))
 
@@ -1159,7 +1215,7 @@ def test_capabilities_endpoint_reports_truthful_availability(
         "capabilities": [
             {"name": "single_image_vqa", "registered": True, "available": True, "state": "AVAILABLE", "provider": "qwen2.5vl-3b", "reason_code": None, "detail": None},
             {"name": "grounding", "registered": True, "available": True, "state": "AVAILABLE", "provider": "grounding-dino-swint", "reason_code": None, "detail": None},
-            {"name": "change_vqa", "registered": False, "available": False, "state": "NOT_IMPLEMENTED", "provider": None, "reason_code": "NO_PROVIDER", "detail": "No real provider is registered for this capability."},
+            {"name": "change_vqa", "registered": True, "available": True, "state": "AVAILABLE", "provider": "change-deterministic", "reason_code": None, "detail": None},
             {"name": "optical_sar", "registered": True, "available": True, "state": "AVAILABLE", "provider": "optical-sar-deterministic", "reason_code": None, "detail": None},
         ]
     }
@@ -1552,8 +1608,8 @@ def test_plan_endpoint_reports_two_step_chain_for_temporal_localization(
             "capability": "change_vqa",
             "depends_on": [],
             "required_inputs": ["scene_pair"],
-            "provider_available": False,
-            "provider": None,
+            "provider_available": True,
+            "provider": "change-deterministic",
         },
         {
             "step_id": "step_2",
@@ -1564,7 +1620,7 @@ def test_plan_endpoint_reports_two_step_chain_for_temporal_localization(
             "provider": "grounding-dino-swint",
         },
     ]
-    assert payload["unavailable_capabilities"] == ["change_vqa"]
+    assert payload["unavailable_capabilities"] == []
     assert payload["executable"] is False
     assert trace_store.records() == []
 

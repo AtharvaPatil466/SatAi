@@ -22,13 +22,11 @@ OPTICAL_SAR = "optical_sar"
 
 # Capabilities with at least one registered provider.
 IMPLEMENTED_CAPABILITIES: frozenset[str] = frozenset(
-    {SINGLE_IMAGE_VQA, GROUNDING, OPTICAL_SAR}
+    {SINGLE_IMAGE_VQA, GROUNDING, CHANGE_VQA, OPTICAL_SAR}
 )
 
 # Capabilities on the roadmap: known vocabulary, no provider, never resolvable.
-UNAVAILABLE_CAPABILITIES: tuple[str, ...] = (
-    CHANGE_VQA,
-)
+UNAVAILABLE_CAPABILITIES: tuple[str, ...] = ()
 
 # The full advertised vocabulary: implemented capabilities first.
 KNOWN_CAPABILITIES: tuple[str, ...] = (
@@ -218,6 +216,15 @@ def register_default_providers() -> None:
             version=model.version,
             capabilities=frozenset({OPTICAL_SAR}),
             model_name="optical-sar-deterministic",
+        )
+    )
+    model = get("change-deterministic")
+    register_provider(
+        Provider(
+            name=model.name,
+            version=model.version,
+            capabilities=frozenset({CHANGE_VQA}),
+            model_name="change-deterministic",
         )
     )
     model = get("grounding-dino-swint")

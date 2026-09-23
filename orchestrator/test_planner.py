@@ -92,6 +92,8 @@ def test_temporal_questions_select_change_vqa(question: str) -> None:
     assert result.selected_capability == CHANGE_VQA
     assert result.rule_id == "change_temporal_compare"
     assert result.missing_inputs == ("second_scene",)
+    assert result.provider_available is True
+    assert result.provider == "change-deterministic"
     assert result.executable is False
 
 
@@ -147,7 +149,7 @@ def test_pair_capabilities_report_missing_second_scene() -> None:
     for capability in (CHANGE_VQA, OPTICAL_SAR):
         result = plan("Question", capability=capability)
         assert result.missing_inputs == ("second_scene",)
-        assert result.provider_available is (capability == OPTICAL_SAR)
+        assert result.provider_available is True
 
 
 def test_pair_capability_with_two_scenes_has_no_missing_inputs() -> None:
@@ -157,7 +159,7 @@ def test_pair_capability_with_two_scenes_has_no_missing_inputs() -> None:
         capability=CHANGE_VQA,
     )
     assert result.missing_inputs == ()
-    assert result.executable is False
+    assert result.executable is True
 
 
 def test_no_scene_is_reported_as_missing() -> None:
