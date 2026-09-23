@@ -405,3 +405,7 @@ Finalizing page optimization ...
   - **Binary Prediction Yes-Rate**: `0.3675` *(Passed two-sided degeneracy guard [0.15, 0.85])*
 - **Resolution Robustness Ladder**: Evaluated on 200 real LoveDA scenes degraded across 5 rungs (0.3m, 1m, 2m, 5m, 10m). Rungs at 5m and 10m exhibit collapse to the gold yes-prior and are flagged as degenerate.
 - **Phase 1 Progress**: Deterministic planner, structured multi-step execution plans, and controlled scene ingestion complete. Grounding DINO integration and threshold evaluation underway.
+
+## Development Status
+
+Active development resumed after the SatQuery demo sprint. Remote-sensing adaptation and benchmark evaluation are the next implementation phase.
