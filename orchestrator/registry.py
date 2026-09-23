@@ -3,6 +3,7 @@
 from models.base import Model
 from models.grounding_dino import GroundingDINOModel
 from models.mock import MockModel
+from models.optical_sar import OpticalSARModel
 from models.qwen_vl import QwenVLModel
 
 _MODELS: dict[str, Model] = {}
@@ -29,3 +30,4 @@ def names() -> list[str]:
 register("mock", MockModel())
 register("qwen2.5vl-3b", QwenVLModel())
 register("grounding-dino-swint", GroundingDINOModel())
+register("optical-sar-deterministic", OpticalSARModel())

@@ -21,19 +21,21 @@ CHANGE_VQA = "change_vqa"
 OPTICAL_SAR = "optical_sar"
 
 # Capabilities with at least one registered provider.
-IMPLEMENTED_CAPABILITIES: frozenset[str] = frozenset({SINGLE_IMAGE_VQA, GROUNDING})
+IMPLEMENTED_CAPABILITIES: frozenset[str] = frozenset(
+    {SINGLE_IMAGE_VQA, GROUNDING, OPTICAL_SAR}
+)
 
 # Capabilities on the roadmap: known vocabulary, no provider, never resolvable.
 UNAVAILABLE_CAPABILITIES: tuple[str, ...] = (
     CHANGE_VQA,
-    OPTICAL_SAR,
 )
 
 # The full advertised vocabulary: implemented capabilities first.
 KNOWN_CAPABILITIES: tuple[str, ...] = (
     SINGLE_IMAGE_VQA,
     GROUNDING,
-    *UNAVAILABLE_CAPABILITIES,
+    CHANGE_VQA,
+    OPTICAL_SAR,
 )
 
 
@@ -192,7 +194,7 @@ def reset_registry() -> None:
 
 
 def register_default_providers() -> None:
-    """Bind the current production provider for single-image VQA.
+    """Bind the current production providers to their capabilities.
 
     The adapter only reads identity metadata from the existing singleton;
     Qwen internals, weights, and scientific behavior are untouched, and the
@@ -207,6 +209,15 @@ def register_default_providers() -> None:
             version=model.version,
             capabilities=frozenset({SINGLE_IMAGE_VQA}),
             model_name="qwen2.5vl-3b",
+        )
+    )
+    model = get("optical-sar-deterministic")
+    register_provider(
+        Provider(
+            name=model.name,
+            version=model.version,
+            capabilities=frozenset({OPTICAL_SAR}),
+            model_name="optical-sar-deterministic",
         )
     )
     model = get("grounding-dino-swint")

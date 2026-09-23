@@ -839,6 +839,28 @@ def scene_compatibility(scene_id: str, scene_id_2: str, workflow: str) -> dict[s
     return evaluate_compatibility(manifests[0], manifests[1], workflow)
 
 
+def _optical_sar_paths(scene_ids: tuple[str, str]) -> list[str]:
+    ordered: dict[str, str] = {}
+    for scene_id in scene_ids:
+        manifest, _ = _manifest_for_scene(scene_id)
+        if manifest is None:
+            raise AnalysisUnavailable("Both optical and SAR manifests are required.")
+        modality = manifest["identity"]["modality"]
+        family = "optical" if modality in {"optical", "multispectral"} else modality
+        native_path = manifest["source"].get("native_path")
+        path = (
+            INGESTED_RASTER_DIR / f"{scene_id}.tif"
+            if isinstance(native_path, str)
+            else None
+        )
+        if family not in {"optical", "sar"} or path is None or not path.is_file():
+            raise AnalysisUnavailable("Both optical and SAR native raster files are required.")
+        ordered[family] = str(path)
+    if set(ordered) != {"optical", "sar"}:
+        raise AnalysisUnavailable("Exactly one optical and one SAR raster are required.")
+    return [ordered["optical"], ordered["sar"]]
+
+
 def _record_unavailable(
     capability: str, provider: str | None, reason_code: str, detail: str,
     scene_ids: tuple[str, ...], question: str, sensor: str | None,
@@ -937,18 +959,31 @@ def analyze_scene(
             )
         return _curated_cached_response(curated, scene_id, sensor, plan)
 
-    image_path = local_scene_image(scene_id)
-    if image_path is None:
-        raise AnalysisUnavailable("No local scene pixels match this request. No answer was generated.")
+    if plan.selected_capability == OPTICAL_SAR:
+        assert scene_id_2 is not None
+        image_paths = _optical_sar_paths((scene_id, scene_id_2))
+    else:
+        image_path = local_scene_image(scene_id)
+        if image_path is None:
+            raise AnalysisUnavailable("No local scene pixels match this request. No answer was generated.")
+        image_paths = [str(image_path)]
 
     try:
         result = execute_plan(
             execution,
             route_fn=route,
-            image_paths=[str(image_path)],
+            image_paths=image_paths,
             question=question,
             base_params={
                 "scene_id": normalize_scene_id(scene_id),
+                **(
+                    {
+                        "scene_id_2": normalize_scene_id(scene_id_2),
+                        "input_modalities": ["optical", "sar"],
+                    }
+                    if plan.selected_capability == OPTICAL_SAR
+                    else {}
+                ),
                 "sensor": sensor,
                 "execution_mode": "live",
             },

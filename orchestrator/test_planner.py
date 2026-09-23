@@ -147,7 +147,7 @@ def test_pair_capabilities_report_missing_second_scene() -> None:
     for capability in (CHANGE_VQA, OPTICAL_SAR):
         result = plan("Question", capability=capability)
         assert result.missing_inputs == ("second_scene",)
-        assert result.provider_available is False
+        assert result.provider_available is (capability == OPTICAL_SAR)
 
 
 def test_pair_capability_with_two_scenes_has_no_missing_inputs() -> None:
