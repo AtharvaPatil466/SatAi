@@ -220,3 +220,36 @@ def test_load_fails_if_model_remains_on_cpu(tmp_path, monkeypatch) -> None:
 
     with pytest.raises(RuntimeError, match="could not be placed on CUDA"):
         GroundingDINOModel(config_path=config)._load()
+
+
+def test_load_preserves_bounded_checkpoint_failure_reason(tmp_path, monkeypatch) -> None:
+    config = tmp_path / "GroundingDINO_SwinT_OGC.py"
+    config.touch()
+    checkpoint = tmp_path / "groundingdino_swint_ogc.pth"
+    checkpoint.write_bytes(b"weights")
+    inference = ModuleType("groundingdino.util.inference")
+    inference.load_image = object()
+    inference.predict = object()
+    inference.load_model = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        RuntimeError("CUDA out of memory\n" + "x" * 500)
+    )
+    monkeypatch.setattr(
+        grounding_module,
+        "validate_artifact",
+        lambda _: ArtifactStatus(True, path=checkpoint),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: True)),
+    )
+    monkeypatch.setitem(sys.modules, "groundingdino", ModuleType("groundingdino"))
+    monkeypatch.setitem(sys.modules, "groundingdino.util", ModuleType("groundingdino.util"))
+    monkeypatch.setitem(sys.modules, "groundingdino.util.inference", inference)
+
+    with pytest.raises(RuntimeError) as raised:
+        GroundingDINOModel(config_path=config)._load()
+
+    assert "RuntimeError: CUDA out of memory" in str(raised.value)
+    assert "\n" not in str(raised.value)
+    assert len(str(raised.value)) < 340

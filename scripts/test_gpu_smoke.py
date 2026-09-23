@@ -1,5 +1,6 @@
 import json
 import sys
+import weakref
 from types import SimpleNamespace
 
 import pytest
@@ -52,3 +53,53 @@ def test_run_case_uses_live_provider_result(tmp_path, monkeypatch) -> None:
     assert report["success"] is True
     assert report["execution_mode"] == "live" and report["results_artifact"] is None
     assert report["input"]["sha256"] and report["output_summary"]["answer_nonempty"]
+
+
+def test_run_case_releases_cyclic_provider_and_cuda_cache(tmp_path, monkeypatch) -> None:
+    references = []
+    empty_cache_calls = []
+
+    class Provider:
+        def __init__(self):
+            self.cycle = self
+            references.append(weakref.ref(self))
+
+        def readiness(self):
+            return ModelReadiness(True)
+
+        def infer(self, _images, _question):
+            return {"answer": "Fields", "confidence": None, "evidence": []}
+
+    torch = SimpleNamespace(
+        cuda=SimpleNamespace(
+            is_available=lambda: True,
+            empty_cache=lambda: empty_cache_calls.append(True),
+        )
+    )
+    monkeypatch.setattr(gpu_smoke, "QwenVLModel", Provider)
+    monkeypatch.setattr(
+        gpu_smoke,
+        "validate_artifact",
+        lambda _: ArtifactStatus(True, path=tmp_path),
+    )
+    monkeypatch.setitem(sys.modules, "torch", torch)
+
+    assert gpu_smoke.run_case("qwen2.5vl-3b")["success"] is True
+    assert references[0]() is None
+    assert empty_cache_calls == [True]
+
+
+def test_isolated_case_reads_child_report(tmp_path, monkeypatch) -> None:
+    def run(command, **kwargs):
+        assert command[:2] == [sys.executable, str(gpu_smoke.Path(gpu_smoke.__file__).resolve())]
+        assert command[2:4] == ["--provider", "grounding-dino-swint"]
+        output = gpu_smoke.Path(command[5])
+        output.write_text(json.dumps({"provider": "grounding-dino-swint", "success": True}))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(gpu_smoke.subprocess, "run", run)
+
+    assert gpu_smoke.run_isolated_case("grounding-dino-swint", tmp_path) == {
+        "provider": "grounding-dino-swint",
+        "success": True,
+    }

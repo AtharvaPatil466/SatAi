@@ -99,8 +99,10 @@ class GroundingDINOModel(Model):
                 str(config_path), str(artifact.path), device="cuda"
             )
         except Exception as exc:
+            detail = " ".join(str(exc).split())[:240] or "no detail"
             raise RuntimeError(
-                "Grounding DINO Swin-T checkpoint could not be loaded"
+                "Grounding DINO Swin-T checkpoint could not be loaded: "
+                f"{type(exc).__name__}: {detail}"
             ) from exc
         try:
             model.to("cuda")

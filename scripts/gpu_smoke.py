@@ -1,12 +1,15 @@
 """One live inference per provider; run only on a provisioned CUDA host."""
 
 import argparse
+import gc
 import hashlib
 import importlib.metadata
 import json
 import math
 import platform
+import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -71,9 +74,21 @@ def case_report(provider: str) -> dict:
     }
 
 
+def release_cuda_memory() -> None:
+    """Release unreachable provider state before the next independent case."""
+    gc.collect()
+    try:
+        import torch
+    except ImportError:
+        return
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 def run_case(provider: str) -> dict:
     report = case_report(provider)
     scene = ROOT / report["input"]["path"]
+    model = None
     try:
         manifest = json.loads((ROOT / "data/demo/manifest.json").read_text(encoding="utf-8"))
         expected = (manifest["resolution_ladder"]["rungs"][1]["asset_sha256"] if provider == "qwen2.5vl-3b" else manifest["scenes"][1]["asset_sha256"])
@@ -98,13 +113,43 @@ def run_case(provider: str) -> dict:
         report["success"] = True
     except Exception as exc:
         report["failure"] = {"reason_code": "SMOKE_FAILED", "detail": f"{type(exc).__name__}: {exc}"}
+    finally:
+        model = None
+        release_cuda_memory()
     return report
+
+
+def run_isolated_case(provider: str, directory: Path) -> dict:
+    """Run one provider in a fresh process so CUDA state cannot cross cases."""
+    output = directory / f"{provider}.json"
+    completed = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve()), "--provider", provider, "--out", str(output)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    try:
+        return json.loads(output.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        report = case_report(provider)
+        detail = " ".join((completed.stderr or completed.stdout).split())[:300]
+        report["failure"] = {
+            "reason_code": "SMOKE_PROCESS_FAILED",
+            "detail": detail or f"Provider process exited {completed.returncode} without a report.",
+        }
+        return report
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", type=Path, default=Path("/kaggle/working/satquery-gpu-smoke.json"))
+    parser.add_argument("--provider", choices=tuple(CASES), help=argparse.SUPPRESS)
     args = parser.parse_args()
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    if args.provider:
+        case = run_case(args.provider)
+        args.out.write_text(json.dumps(case, indent=2) + "\n", encoding="utf-8")
+        return 0 if case["success"] else 1
     try:
         import torch
         cuda = torch.cuda.is_available()
@@ -125,12 +170,14 @@ def main() -> int:
         "cases": [],
     }
     if cuda:
-        report["cases"] = [run_case(provider) for provider in CASES]
+        with tempfile.TemporaryDirectory(prefix="satquery-smoke-", dir=args.out.parent) as temporary:
+            report["cases"] = [
+                run_isolated_case(provider, Path(temporary)) for provider in CASES
+            ]
     else:
         report["cases"] = [case_report(provider) for provider in CASES]
         for case in report["cases"]:
             case["failure"] = {"reason_code": "CUDA_UNAVAILABLE", "detail": "CUDA GPU required"}
-    args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(f"GPU smoke report: {args.out}")
     return 0 if all(case["success"] for case in report["cases"]) else 1
