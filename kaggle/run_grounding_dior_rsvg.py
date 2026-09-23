@@ -71,10 +71,6 @@ def prepare_dataset(root: Path) -> Path:
 
 
 def main() -> int:
-    import torch
-
-    assert torch.cuda.is_available(), "CUDA GPU not found. Select a T4 accelerator in Kaggle first."
-    print(f"torch={torch.__version__}; gpu={torch.cuda.get_device_name(0)}", flush=True)
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-url", default=os.environ.get("SIH26167_REPO_URL"))
     parser.add_argument("--repo-dir", type=Path, default=Path("/kaggle/working/sih26167"))
@@ -90,6 +86,10 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    import torch
+
+    assert torch.cuda.is_available(), "CUDA GPU not found. Select a T4 accelerator in Kaggle first."
+    print(f"torch={torch.__version__}; gpu={torch.cuda.get_device_name(0)}", flush=True)
     run(
         [
             sys.executable,
