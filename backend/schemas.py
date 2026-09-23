@@ -15,12 +15,20 @@ class AnalyzeRequest(BaseModel):
         default=None,
         description="Optional explicit capability; omitted requests are planned deterministically.",
     )
+    scene_id_2: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Optional second scene for pairwise capabilities such as change_vqa. "
+            "Omitting it keeps the single-scene planning behaviour unchanged."
+        ),
+    )
 
 
 class SceneUploadResponse(BaseModel):
     scene_id: str
     filename: str
-    format: Literal["PNG", "JPEG"]
+    format: Literal["PNG", "JPEG", "TIFF"]
     width: int
     height: int
     sensor: str | None = None

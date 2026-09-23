@@ -1,4 +1,4 @@
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 
 from backend.schemas import (
@@ -14,6 +14,7 @@ from backend.services import (
     InvalidImageUpload,
     ModelExecutionError,
     ModelUnavailable,
+    PairCompatibilityError,
     SceneStorageError,
     analyze_scene,
     capabilities_overview,
@@ -31,13 +32,32 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 
 @router.post("/scenes", response_model=SceneUploadResponse, status_code=status.HTTP_201_CREATED)
-async def upload_scene(file: UploadFile = File(...)) -> SceneUploadResponse:
+async def upload_scene(
+    file: UploadFile = File(...),
+    modality: str | None = Form(default=None),
+    sensor: str | None = Form(default=None),
+    acquisition_timestamp: str | None = Form(default=None),
+    polarization: str | None = Form(default=None),
+    pair_group: str | None = Form(default=None),
+    benchmark_source: str | None = Form(default=None),
+) -> SceneUploadResponse:
     data = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="The uploaded image exceeds the 20 MiB limit.")
     try:
         return SceneUploadResponse.model_validate(
-            ingest_scene(data, file.filename or "upload")
+            ingest_scene(
+                data,
+                file.filename or "upload",
+                {
+                    "modality": modality,
+                    "sensor": sensor,
+                    "acquisition_timestamp": acquisition_timestamp,
+                    "polarization": polarization,
+                    "pair_group": pair_group,
+                    "benchmark_source": benchmark_source,
+                },
+            )
         )
     except InvalidImageUpload as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -67,6 +87,7 @@ def plan(request: AnalyzeRequest) -> PlanResponse:
                 request.question,
                 request.sensor,
                 request.capability,
+                request.scene_id_2,
             )
         )
     except (InvalidPlanRequest, UnknownCapability) as exc:
@@ -79,7 +100,13 @@ def plan(request: AnalyzeRequest) -> PlanResponse:
 def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     try:
         return AnalyzeResponse.model_validate(
-            analyze_scene(request.scene_id, request.question, request.sensor, request.capability)
+            analyze_scene(
+                request.scene_id,
+                request.question,
+                request.sensor,
+                request.capability,
+                request.scene_id_2,
+            )
         )
     except ArtifactError as exc:
         raise HTTPException(
@@ -87,6 +114,8 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
         ) from exc
     except (AnalysisUnavailable, InvalidPlanRequest) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except PairCompatibilityError as exc:
+        raise HTTPException(status_code=422, detail=exc.result) from exc
     except UnknownCapability as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except CapabilityUnavailable as exc:

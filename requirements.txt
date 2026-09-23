@@ -16,3 +16,4 @@ torchvision
 accelerate
 asf_search
 hyp3_sdk
+pyarrow>=17,<23

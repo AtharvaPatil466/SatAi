@@ -8,3 +8,5 @@ python-multipart==0.0.22
 # backend cannot even be imported without this. It was missing: a clean install
 # from this file failed at `from PIL import Image`, which CI caught on first run.
 pillow>=11,<12
+numpy>=2,<3
+rasterio>=1.4,<2
