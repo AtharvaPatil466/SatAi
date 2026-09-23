@@ -6,6 +6,7 @@ import pytest
 
 import models.grounding_dino.model as grounding_module
 from models.grounding_dino import GroundingDINOModel
+from models.artifacts import ArtifactStatus
 
 
 def test_infer_returns_normalized_bounding_box_contract(tmp_path, monkeypatch) -> None:
@@ -112,3 +113,110 @@ def test_readiness_fails_closed_without_local_checkpoint(tmp_path, monkeypatch) 
     readiness = GroundingDINOModel().readiness()
     assert readiness.available is False
     assert readiness.reason_code == "ARTIFACT_UNAVAILABLE"
+
+
+def test_packaged_config_discovery(tmp_path, monkeypatch) -> None:
+    package = tmp_path / "groundingdino"
+    config = package / "config" / "GroundingDINO_SwinT_OGC.py"
+    config.parent.mkdir(parents=True)
+    config.touch()
+    groundingdino = ModuleType("groundingdino")
+    groundingdino.__file__ = str(package / "__init__.py")
+    monkeypatch.setitem(sys.modules, "groundingdino", groundingdino)
+
+    assert GroundingDINOModel()._resolve_config() == config.resolve()
+
+
+def test_missing_explicit_config_fails_readiness(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(grounding_module, "find_spec", lambda _: object())
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: True)),
+    )
+    readiness = GroundingDINOModel(config_path=tmp_path / "missing.py").readiness()
+
+    assert readiness.available is False
+    assert readiness.reason_code == "NOT_CONFIGURED"
+    assert "missing.py" in readiness.detail
+
+
+def test_readiness_and_load_use_same_resolved_config(tmp_path, monkeypatch) -> None:
+    first_config = tmp_path / "first.py"
+    first_config.touch()
+    second_config = tmp_path / "second.py"
+    second_config.touch()
+    checkpoint = tmp_path / "groundingdino_swint_ogc.pth"
+    checkpoint.write_bytes(b"weights")
+    loaded_with = []
+
+    class FakeModel:
+        def to(self, device):
+            assert device == "cuda"
+
+        def parameters(self):
+            return iter([SimpleNamespace(device=SimpleNamespace(type="cuda"))])
+
+    inference = ModuleType("groundingdino.util.inference")
+    inference.load_image = object()
+    inference.predict = object()
+    inference.load_model = lambda config, weights, device: (
+        loaded_with.append((config, weights, device)) or FakeModel()
+    )
+    monkeypatch.setattr(grounding_module, "find_spec", lambda _: object())
+    monkeypatch.setattr(
+        grounding_module,
+        "validate_artifact",
+        lambda _: ArtifactStatus(True, path=checkpoint),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: True)),
+    )
+    monkeypatch.setitem(sys.modules, "groundingdino", ModuleType("groundingdino"))
+    monkeypatch.setitem(sys.modules, "groundingdino.util", ModuleType("groundingdino.util"))
+    monkeypatch.setitem(sys.modules, "groundingdino.util.inference", inference)
+    monkeypatch.setenv("SATQUERY_GROUNDING_CONFIG", str(first_config))
+    model = GroundingDINOModel()
+
+    assert model.readiness().available
+    monkeypatch.setenv("SATQUERY_GROUNDING_CONFIG", str(second_config))
+    model._load()
+
+    assert loaded_with == [(str(first_config.resolve()), str(checkpoint), "cuda")]
+
+
+def test_load_fails_if_model_remains_on_cpu(tmp_path, monkeypatch) -> None:
+    config = tmp_path / "GroundingDINO_SwinT_OGC.py"
+    config.touch()
+    checkpoint = tmp_path / "groundingdino_swint_ogc.pth"
+    checkpoint.write_bytes(b"weights")
+
+    class CpuModel:
+        def to(self, _device):
+            return self
+
+        def parameters(self):
+            return iter([SimpleNamespace(device=SimpleNamespace(type="cpu"))])
+
+    inference = ModuleType("groundingdino.util.inference")
+    inference.load_image = object()
+    inference.predict = object()
+    inference.load_model = lambda *_args, **_kwargs: CpuModel()
+    monkeypatch.setattr(
+        grounding_module,
+        "validate_artifact",
+        lambda _: ArtifactStatus(True, path=checkpoint),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: True)),
+    )
+    monkeypatch.setitem(sys.modules, "groundingdino", ModuleType("groundingdino"))
+    monkeypatch.setitem(sys.modules, "groundingdino.util", ModuleType("groundingdino.util"))
+    monkeypatch.setitem(sys.modules, "groundingdino.util.inference", inference)
+
+    with pytest.raises(RuntimeError, match="could not be placed on CUDA"):
+        GroundingDINOModel(config_path=config)._load()
