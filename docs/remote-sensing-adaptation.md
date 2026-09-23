@@ -20,58 +20,138 @@ Each prompt contains one resized image, the original RSVQA question, and the sam
 
 ## Kaggle GPU procedure
 
-Provision these as Kaggle inputs before starting an offline run:
+This sequence assumes the reviewed migration commit has been pushed by a human. Replace every angle-bracket placeholder from the mounted Kaggle inputs; the scripts never download the model or dataset.
 
-1. The complete local Qwen checkpoint at `/kaggle/input/satquery-models/qwen2.5-vl-3b-instruct`.
-2. The official RSVQA-LR metadata JSON files and extracted `Images_LR.zip` TIFFs under `/kaggle/input/rsvqa-lr`.
-3. Compatible `peft` and `bitsandbytes` wheels if they are absent from the image. Install those wheels explicitly with `pip --no-index --find-links /kaggle/input/satquery-wheels peft bitsandbytes`; do not let the training command access the network.
+### 1. Check out and identify the exact code
 
-From the repository root:
+```bash
+git clone https://github.com/sohamsssssssssssssssss/sih2026.git /kaggle/working/sih2026
+cd /kaggle/working/sih2026
+git checkout <REVIEWED_MIGRATION_COMMIT_SHA>
+test "$(git rev-parse HEAD)" = "<REVIEWED_MIGRATION_COMMIT_SHA>"
+```
 
-```sh
+For a fully offline notebook, upload a repository archive instead and run the same `git rev-parse HEAD` check in the extracted checkout.
+
+### 2. Install only provisioned dependencies
+
+Use wheels compatible with the notebook's installed CUDA PyTorch. Network-free installation is:
+
+```bash
+python -m pip install --no-index --find-links /kaggle/input/satquery-wheels \
+  -r requirements-training.txt
+python - <<'PY'
+import importlib.metadata as m
+for name in ('torch', 'transformers', 'accelerate', 'peft', 'bitsandbytes', 'qwen-vl-utils'):
+    print(name, m.version(name))
+PY
+```
+
+If compatible packages are already installed, record their versions and skip installation. Do not change versions during a result-producing run without recording the resulting environment.
+
+### 3. Locate and verify the local base checkpoint
+
+```bash
+export SATQUERY_QWEN_MODEL_DIR=<LOCAL_QWEN_CHECKPOINT_DIRECTORY>
+test -f "$SATQUERY_QWEN_MODEL_DIR/config.json"
+test -f "$SATQUERY_QWEN_MODEL_DIR/preprocessor_config.json"
+find "$SATQUERY_QWEN_MODEL_DIR" -maxdepth 1 -type f -printf '%f\n' | sort
+```
+
+The directory must contain a complete local `Qwen/Qwen2.5-VL-3B-Instruct` checkpoint. Revision and checksum remain `null` unless independently verified.
+
+### 4. Provision and inspect RSVQA-LR
+
+Set the root to the already extracted official RSVQA-LR release. The preparation script expects these metadata files at the root:
+
+```text
+LR_split_train_images.json       LR_split_train_questions.json       LR_split_train_answers.json
+LR_split_val_images.json         LR_split_val_questions.json         LR_split_val_answers.json
+LR_split_test_images.json        LR_split_test_questions.json        LR_split_test_answers.json
+```
+
+TIFFs may be below that root; they are discovered recursively by exact `<image_id>.tif` filename. Validate what was mounted before generating a manifest:
+
+```bash
+export RSVQA_ROOT=<EXTRACTED_OFFICIAL_RSVQA_LR_ROOT>
+for split in train val test; do
+  test -f "$RSVQA_ROOT/LR_split_${split}_images.json"
+  test -f "$RSVQA_ROOT/LR_split_${split}_questions.json"
+  test -f "$RSVQA_ROOT/LR_split_${split}_answers.json"
+done
+find "$RSVQA_ROOT" -type f -name '*.tif' | head
+```
+
+### 5. Generate and validate the manifest
+
+```bash
+export RSVQA_MANIFEST=/kaggle/working/rsvqa-lr.jsonl
+python scripts/prepare_rsvqa_training_manifest.py \
+  --dataset-root "$RSVQA_ROOT" \
+  --out "$RSVQA_MANIFEST"
+sha256sum "$RSVQA_MANIFEST"
+wc -l "$RSVQA_MANIFEST"
+```
+
+The preparation command now runs the same full manifest/image validation used by training. It fails on missing or corrupt images, malformed records, duplicate identities, unsupported splits, or image leakage across splits.
+
+### 6. Run the one-sample gradient dry run
+
+```bash
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
-
-python scripts/prepare_rsvqa_training_manifest.py \
-  --dataset-root /kaggle/input/rsvqa-lr \
-  --out /kaggle/working/rsvqa-lr.jsonl
-
+export DRY_OUT=/kaggle/working/satquery-qwen-rsvqa-dry-run
 python scripts/train_remote_sensing_adapter.py \
-  --model-path /kaggle/input/satquery-models/qwen2.5-vl-3b-instruct \
-  --dataset-manifest /kaggle/working/rsvqa-lr.jsonl \
-  --image-root /kaggle/input/rsvqa-lr \
-  --output-dir /kaggle/working/satquery-qwen-rsvqa-dry-run \
+  --model-path "$SATQUERY_QWEN_MODEL_DIR" \
+  --dataset-manifest "$RSVQA_MANIFEST" \
+  --image-root "$RSVQA_ROOT" \
+  --output-dir "$DRY_OUT" \
   --max-samples 1 --image-size 224 --batch-size 1 \
   --gradient-accumulation-steps 1 --precision fp16 \
   --quantization 4bit --lora-rank 16 --lora-alpha 32 --dry-run
+python -m json.tool "$DRY_OUT/training-report.json"
+test ! -e "$DRY_OUT/adapter"
 ```
 
-The dry run loads the manifest, constructs and tokenizes a real multimodal prompt, collates labels, loads the local quantized base model, attaches LoRA, and performs one forward/backward loss and gradient check. It performs no optimizer step and writes no adapter.
+The dry run constructs a real multimodal prompt, tokenizes and collates it, loads only local model files, attaches LoRA, and performs one finite forward/backward gradient check. It performs no optimizer step and writes no adapter.
 
-If that succeeds and observed T4 memory is safe, run the bounded first training job:
+### 7. Run the bounded first training job
 
-```sh
+Proceed only if the dry run passes and observed T4 memory is safe:
+
+```bash
+export TRAIN_OUT=/kaggle/working/satquery-qwen-rsvqa-first-run
 python scripts/train_remote_sensing_adapter.py \
-  --model-path /kaggle/input/satquery-models/qwen2.5-vl-3b-instruct \
-  --dataset-manifest /kaggle/working/rsvqa-lr.jsonl \
-  --image-root /kaggle/input/rsvqa-lr \
-  --output-dir /kaggle/working/satquery-qwen-rsvqa-first-run \
+  --model-path "$SATQUERY_QWEN_MODEL_DIR" \
+  --dataset-manifest "$RSVQA_MANIFEST" \
+  --image-root "$RSVQA_ROOT" \
+  --output-dir "$TRAIN_OUT" \
   --seed 17 --max-samples 128 --image-size 224 \
   --batch-size 1 --gradient-accumulation-steps 8 \
   --max-steps 10 --precision fp16 --quantization 4bit \
   --lora-rank 16 --lora-alpha 32 --lora-dropout 0.05
+python -m json.tool "$TRAIN_OUT/training-report.json"
+test -f "$TRAIN_OUT/adapter/adapter_config.json"
 ```
 
-Then compare the base and adapter on the separate validation split:
+This configuration discovers T4 feasibility; it is not a tuned recipe or performance claim.
 
-```sh
+### 8. Compare base and adapter on validation
+
+```bash
+export EVAL_REPORT=/kaggle/working/satquery-qwen-rsvqa-validation.json
 python scripts/evaluate_remote_sensing_adapter.py \
-  --model-path /kaggle/input/satquery-models/qwen2.5-vl-3b-instruct \
-  --adapter-path /kaggle/working/satquery-qwen-rsvqa-first-run/adapter \
-  --dataset-manifest /kaggle/working/rsvqa-lr.jsonl \
-  --image-root /kaggle/input/rsvqa-lr \
+  --model-path "$SATQUERY_QWEN_MODEL_DIR" \
+  --adapter-path "$TRAIN_OUT/adapter" \
+  --dataset-manifest "$RSVQA_MANIFEST" \
+  --image-root "$RSVQA_ROOT" \
   --split validation --max-samples 200 --seed 17 --image-size 224 \
-  --out /kaggle/working/satquery-qwen-rsvqa-validation.json
+  --out "$EVAL_REPORT"
+python -m json.tool "$EVAL_REPORT"
 ```
 
-Bring back the generated JSONL manifest or its SHA-256, `training-report.json`, the complete `adapter/` directory, trainer checkpoints/logs needed for diagnosis, and the validation report. Training completion alone does not demonstrate improvement. Record accuracy only from the generated held-out comparison, keep the official test split untouched until configuration is locked, and do not claim VRSBench, CDVQA, ISRO, or broader remote-sensing performance from RSVQA-LR results.
+Use validation for configuration decisions. Keep official test untouched until the configuration is locked. Case-insensitive exact match is a narrow comparison metric and does not fully characterize remote-sensing VQA quality.
+
+### 9. Preserve evidence without committing large artifacts
+
+Download or attach as external artifacts: the manifest (or its SHA-256), dry-run and training `training-report.json`, dependency/version output, relevant trainer logs, the complete adapter directory, and the validation report. Keep checkpoints, adapter weights, dataset pixels, and Kaggle output outside Git. Training completion alone does not demonstrate improvement, and these runs do not establish VRSBench, CDVQA, ISRO/SAC, or general remote-sensing performance.

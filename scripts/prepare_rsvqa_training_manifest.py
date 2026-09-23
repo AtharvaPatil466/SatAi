@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from training.remote_sensing import SPLITS  # noqa: E402
+from training.remote_sensing import SPLITS, load_manifest  # noqa: E402
 
 SOURCE = "RSVQA-LR, Zenodo record 6344334"
 
@@ -64,6 +64,9 @@ def build_manifest(dataset_root: Path, output: Path) -> int:
         "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),
         encoding="utf-8",
     )
+    validated = load_manifest(output, dataset_root)
+    if len(validated) != len(records):
+        raise RuntimeError("Generated RSVQA-LR manifest validation count mismatch")
     return len(records)
 
 
