@@ -23,7 +23,7 @@ from rasterio.io import MemoryFile
 
 from backend.scene_pack import (
     ScenePackError,
-    identify_scene,
+    manifest as scene_pack_manifest,
     resolution_assets,
     scene_asset,
 )
@@ -115,8 +115,20 @@ class ModelExecutionError(RuntimeError):
 @lru_cache(maxsize=1)
 def load_results() -> dict[str, Any]:
     try:
-        return json.loads(RESULTS_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        data = RESULTS_PATH.read_bytes()
+        scene = next(
+            item
+            for item in scene_pack_manifest()["scenes"]
+            if item.get("source", {}).get("source_id") == GOLDEN_SCENE_ID
+        )
+        artifact = scene["artifact"]
+        if (
+            artifact.get("path") != RESULTS_RELATIVE_PATH
+            or artifact.get("sha256") != hashlib.sha256(data).hexdigest()
+        ):
+            raise ValueError
+        return json.loads(data)
+    except (KeyError, OSError, StopIteration, ValueError, json.JSONDecodeError) as exc:
         raise ArtifactError(f"Required resolution artifact is unavailable: {exc}") from exc
 
 
@@ -397,22 +409,7 @@ def ingest_scene(
             assert native_temporary is not None
             native_temporary.write_bytes(data)
         canonical.save(temporary, format="PNG")
-        try:
-            known_scene = identify_scene(temporary)
-        except ScenePackError:
-            known_scene = None
-        source_metadata = known_scene.get("source", {}) if known_scene else {}
-        provenance = {
-            field: "user_declared_upload"
-            for field in declared
-        }
-        if "sensor" not in declared and source_metadata.get("sensor") is not None:
-            provenance["sensor"] = "committed_scene_pack"
-        if (
-            "acquisition_timestamp" not in declared
-            and source_metadata.get("acquisition_date") is not None
-        ):
-            provenance["acquisition_timestamp"] = "committed_scene_pack"
+        provenance = {field: "user_declared_upload" for field in declared}
         manifest: SceneManifest = {
             "version": SCENE_MANIFEST_VERSION,
             "scene_id": scene_id,
@@ -437,12 +434,10 @@ def ingest_scene(
             },
             "raster": raster,
             "identity": {
-                "sensor": declared.get("sensor", source_metadata.get("sensor")),
+                "sensor": declared.get("sensor"),
                 "modality": declared.get("modality", "unknown"),
                 "acquisition_id": None,
-                "acquisition_time": declared.get(
-                    "acquisition_timestamp", source_metadata.get("acquisition_date")
-                ),
+                "acquisition_time": declared.get("acquisition_timestamp"),
                 "polarizations": declared.get("polarizations", []),
                 "benchmark_source": declared.get("benchmark_source"),
                 "provenance": provenance,
@@ -451,7 +446,7 @@ def ingest_scene(
                 "geographic_group": None,
                 "pair_group": declared.get("pair_group"),
                 "paired_scene_ids": [],
-                "original_split": source_metadata.get("dataset_split"),
+                "original_split": None,
                 "label_source": None,
             },
         }
@@ -480,19 +475,16 @@ def ingest_scene(
                 except OSError:
                     pass
 
-    source = known_scene.get("source", {}) if known_scene else {}
     return {
         "scene_id": scene_id,
         "filename": safe_filename,
         "format": detected_format,
         "width": width,
         "height": height,
-        "sensor": declared.get("sensor", source.get("sensor")),
-        "gsd": str(source["gsd"]) if source.get("gsd") is not None else None,
-        "location": source.get("location"),
-        "acquisition_date": declared.get(
-            "acquisition_timestamp", source.get("acquisition_date")
-        ),
+        "sensor": declared.get("sensor"),
+        "gsd": None,
+        "location": None,
+        "acquisition_date": declared.get("acquisition_timestamp"),
     }
 
 
@@ -623,6 +615,7 @@ def analyze_scene(
     sensor: str | None,
     capability: str | None = None,
     scene_id_2: str | None = None,
+    execution_mode: str = "live",
 ) -> dict[str, Any]:
     question = question.strip()
     if not question:
@@ -651,19 +644,22 @@ def analyze_scene(
         raise CapabilityUnavailable(
             plan.unavailable_reason or "The selected capability cannot be executed."
         )
-    cached = (
-        find_cached_result(scene_id, question, plan.selected_capability)
-        if is_golden_eligible_plan(execution)
-        else None
-    )
-    image_path = local_scene_image(scene_id)
-    if image_path is None:
+    if execution_mode == "cached_result":
+        if not is_golden_eligible_plan(execution):
+            raise AnalysisUnavailable(
+                "No replay artifact is available for this capability. No answer was generated."
+            )
+        cached = find_cached_result(scene_id, question, plan.selected_capability)
         if cached is None:
             raise AnalysisUnavailable(
-                "No local scene pixels or exact committed result match this scene and question. No answer was generated."
+                "No exact measured result matches this scene and question. No answer was generated."
             )
-        return _cached_response(
-            cached, sensor, "local scene pixels unavailable", plan
+        return _cached_response(cached, sensor, "explicit artifact replay", plan)
+
+    image_path = local_scene_image(scene_id)
+    if image_path is None:
+        raise AnalysisUnavailable(
+            "No local scene pixels match this request. No answer was generated."
         )
 
     try:
@@ -687,10 +683,6 @@ def analyze_scene(
     except (CapabilityUnavailable, UnknownCapability):
         raise
     except ModelExecutionTimeout as exc:
-        if cached is not None:
-            return _cached_response(
-                cached, sensor, "model execution timed out", plan
-            )
         raise ModelUnavailable from exc
     except Exception as exc:
         unavailable = any(
@@ -703,11 +695,8 @@ def analyze_scene(
                 "checkpoint could not be loaded",
             )
         )
-        if cached is None:
-            error = ModelUnavailable if unavailable else ModelExecutionError
-            raise error from exc
-        reason = "no CUDA GPU" if unavailable else "model execution failed"
-        return _cached_response(cached, sensor, reason, plan)
+        error = ModelUnavailable if unavailable else ModelExecutionError
+        raise error from exc
 
 
 def _scene_ids(scene_id: str, scene_id_2: str | None) -> tuple[str, ...]:

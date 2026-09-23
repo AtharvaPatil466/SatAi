@@ -106,6 +106,7 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
                 request.sensor,
                 request.capability,
                 request.scene_id_2,
+                request.execution_mode,
             )
         )
     except ArtifactError as exc:

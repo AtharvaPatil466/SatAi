@@ -25,6 +25,7 @@ from orchestrator import router as model_router
 
 @pytest.fixture(autouse=True)
 def isolated_trace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    services.load_results.cache_clear()
     trace_store._TRACE.clear()
     trace_store._LOADED_PATH = None
     monkeypatch.setattr(trace_store, "TRACE_PATH", tmp_path / "trace.jsonl")
@@ -32,6 +33,7 @@ def isolated_trace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(services, "INGESTED_RASTER_DIR", tmp_path / "rasters")
     monkeypatch.setattr(services, "SCENE_MANIFEST_DIR", tmp_path / "manifests")
     yield
+    services.load_results.cache_clear()
     trace_store._TRACE.clear()
     trace_store._LOADED_PATH = None
 
@@ -128,7 +130,7 @@ def test_sar_returns_human_labeled_annotation(client: TestClient) -> None:
     assert set(payload["summaries"]) == {"water", "built_up", "vegetation", "terrain"}
 
 
-def test_golden_analysis_falls_back_to_exact_cache(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_golden_analysis_replays_only_when_explicitly_requested(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     def no_gpu(**_: object) -> dict:
         raise RuntimeError("Qwen2.5-VL inference requires a CUDA GPU")
 
@@ -139,6 +141,7 @@ def test_golden_analysis_falls_back_to_exact_cache(client: TestClient, monkeypat
             "scene_id": services.GOLDEN_SCENE_ID,
             "question": services.GOLDEN_QUESTION,
             "sensor": "LoveDA",
+            "execution_mode": "cached_result",
         },
     )
     assert response.status_code == 200
@@ -149,6 +152,26 @@ def test_golden_analysis_falls_back_to_exact_cache(client: TestClient, monkeypat
     assert payload["trace"]["params"]["planner_version"] == "phase0-rules-v1"
     assert payload["trace"]["params"]["planner_rule"] == "default_single_image_vqa"
 
+
+
+def test_live_failure_never_falls_back_to_cached_result(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        services,
+        "route",
+        lambda **_: (_ for _ in ()).throw(RuntimeError("CUDA GPU unavailable")),
+    )
+    response = client.post(
+        "/api/analyze",
+        json={
+            "scene_id": services.GOLDEN_SCENE_ID,
+            "question": services.GOLDEN_QUESTION,
+        },
+    )
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Live model inference is unavailable."}
+    assert trace_store.records() == []
 
 def test_unmatched_query_never_fabricates(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
@@ -173,7 +196,7 @@ def test_trace_history_and_verification(client: TestClient, monkeypatch: pytest.
     monkeypatch.setattr(services, "route", lambda **_: (_ for _ in ()).throw(RuntimeError("no GPU")))
     client.post(
         "/api/analyze",
-        json={"scene_id": services.GOLDEN_SCENE_ID, "question": services.GOLDEN_QUESTION, "sensor": "LoveDA"},
+        json={"scene_id": services.GOLDEN_SCENE_ID, "question": services.GOLDEN_QUESTION, "sensor": "LoveDA", "execution_mode": "cached_result"},
     )
     history = client.get("/api/traces").json()
     assert history["count"] == 1
@@ -181,7 +204,30 @@ def test_trace_history_and_verification(client: TestClient, monkeypatch: pytest.
     assert verification == {"verified": True, "message": "Chain verified (1 records)"}
 
 
+def test_modified_cached_artifact_fails_closed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    modified = tmp_path / "ladder.json"
+    modified.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(services, "RESULTS_PATH", modified)
+    services.load_results.cache_clear()
+    response = client.post(
+        "/api/analyze",
+        json={
+            "scene_id": services.GOLDEN_SCENE_ID,
+            "question": services.GOLDEN_QUESTION,
+            "execution_mode": "cached_result",
+        },
+    )
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Required analysis artifacts are temporarily unavailable."
+    }
+    assert trace_store.records() == []
+
+
 @pytest.mark.parametrize("endpoint", [("get", "/api/traces"), ("post", "/api/traces/verify")])
+
 def test_corrupt_trace_returns_sanitized_503(
     client: TestClient, endpoint: tuple[str, str]
 ) -> None:
@@ -259,6 +305,27 @@ def test_png_upload_returns_factual_metadata(client: TestClient) -> None:
     assert manifest["source"]["format"] == "PNG"
     assert manifest["raster"] is None
 
+
+
+def test_uploaded_pixels_do_not_inherit_curated_scene_identity(
+    client: TestClient,
+) -> None:
+    asset = services.local_scene_image(services.GOLDEN_SCENE_ID)
+    assert asset is not None
+    response = upload(client, "copied-golden.png", asset.read_bytes(), content_type="image/png")
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["scene_id"].startswith("scene_")
+    assert payload["sensor"] is None
+    assert payload["gsd"] is None
+    assert payload["location"] is None
+    assert payload["acquisition_date"] is None
+    scene_id = payload["scene_id"]
+    manifest = json.loads(
+        (services.SCENE_MANIFEST_DIR / f"{scene_id}.json").read_text()
+    )
+    assert manifest["identity"]["provenance"] == {}
+    assert manifest["grouping"]["original_split"] is None
 
 def test_jpeg_upload_is_served_as_canonical_png(client: TestClient) -> None:
     response = upload(client, "satellite.jpg", image_bytes("JPEG"))
@@ -932,6 +999,7 @@ def test_invalid_cached_answer_fails_before_trace(
             "scene_id": services.GOLDEN_SCENE_ID,
             "question": services.GOLDEN_QUESTION,
             "sensor": "LoveDA",
+            "execution_mode": "cached_result",
         },
     )
 
