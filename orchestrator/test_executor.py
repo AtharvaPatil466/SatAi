@@ -120,7 +120,7 @@ def test_executor_rejects_planned_two_step_change_chain() -> None:
         calls.append(kwargs)
         return {"answer": "Yes", "trace": {"params": {}}}
 
-    with pytest.raises(CapabilityUnavailable, match="single executable step"):
+    with pytest.raises(CapabilityUnavailable, match="Multi-step change-to-grounding"):
         call(
             build("Where did flooding increase?", scenes=("a", "b")),
             route_fn=route_fn,

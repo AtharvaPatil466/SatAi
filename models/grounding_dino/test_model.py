@@ -36,6 +36,25 @@ def test_infer_returns_normalized_bounding_box_contract(tmp_path, monkeypatch) -
     }
 
 
+@pytest.mark.parametrize(
+    "boxes,scores,message",
+    [
+        ([[float("nan"), 0.5, 0.2, 0.2]], [0.8], "non-finite"),
+        ([[0.5, 0.5, -0.2, 0.2]], [0.8], "out-of-range"),
+        ([[0.5, 0.5, 0.2, 0.2]], [float("inf")], "non-finite"),
+        ([[0.5, 0.5, 0.2]], [0.8], "malformed box"),
+    ],
+)
+def test_infer_rejects_malformed_evidence(tmp_path, monkeypatch, boxes, scores, message) -> None:
+    image = tmp_path / "scene.png"
+    image.touch()
+    model = GroundingDINOModel()
+    monkeypatch.setattr(model, "_predict", lambda *_: (boxes, scores, ["bridge"]))
+
+    with pytest.raises(ValueError, match=message):
+        model.infer([str(image)], "bridge")
+
+
 def test_infer_reports_no_match_when_evidence_is_empty(tmp_path, monkeypatch) -> None:
     image = tmp_path / "scene.png"
     image.touch()

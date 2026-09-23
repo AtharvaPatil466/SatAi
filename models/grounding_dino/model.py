@@ -1,5 +1,6 @@
 """Lazy Grounding DINO inference wrapper."""
 
+import math
 import os
 from pathlib import Path
 from importlib.util import find_spec
@@ -157,7 +158,14 @@ class GroundingDINOModel(Model):
         boxes, scores, labels = self._predict(str(image_path), query)
         evidence = []
         for box, score, label in zip(boxes, scores, labels, strict=True):
+            if len(box) != 4:
+                raise ValueError("Grounding DINO returned a malformed box")
             center_x, center_y, width, height = map(float, box)
+            score = float(score)
+            if not all(math.isfinite(value) for value in (center_x, center_y, width, height, score)):
+                raise ValueError("Grounding DINO returned non-finite evidence")
+            if not 0.0 <= score <= 1.0 or width < 0.0 or height < 0.0:
+                raise ValueError("Grounding DINO returned out-of-range evidence")
             coordinates = [
                 max(0.0, min(1.0, center_x - width / 2)),
                 max(0.0, min(1.0, center_y - height / 2)),
@@ -170,7 +178,7 @@ class GroundingDINOModel(Model):
                     "label": str(label),
                     "coordinates": coordinates,
                     "coordinate_space": "normalized_xyxy",
-                    "confidence": max(0.0, min(1.0, float(score))),
+                    "confidence": score,
                     "source_scene_id": None,
                 }
             )

@@ -90,7 +90,7 @@ def load_manifest(manifest: Path, image_root: Path | None = None) -> list[Traini
     root = (image_root or manifest.parent).resolve()
     examples: list[TrainingExample] = []
     identities: set[tuple[str, str]] = set()
-    image_splits: dict[tuple[str, Path], set[str]] = {}
+    image_splits: dict[Path, set[str]] = {}
     validated_images: set[Path] = set()
     for line_number, raw in enumerate(manifest.read_text(encoding="utf-8").splitlines(), 1):
         if not raw.strip():
@@ -122,7 +122,7 @@ def load_manifest(manifest: Path, image_root: Path | None = None) -> list[Traini
         if identity in identities:
             raise ValueError(f"line {line_number}: duplicate dataset/sample identity: {identity}")
         identities.add(identity)
-        image_splits.setdefault((dataset, image_path), set()).add(split)
+        image_splits.setdefault(image_path, set()).add(split)
         examples.append(
             TrainingExample(
                 image_path=image_path,

@@ -312,6 +312,9 @@ def plan_request(request: PlanRequest) -> Plan:
         provider = resolved.provider_name
         unavailable_reason = None if provider_available else str(readiness["detail"])
 
+    if rule_id == TEMPORAL_LOCALIZATION_RULE_ID:
+        unavailable_reason = "Multi-step change-to-grounding execution is not implemented."
+
     sensor = " ".join(_tokens(request.sensor or ""))
     if capability == SINGLE_IMAGE_VQA and sensor in {
         "sar",

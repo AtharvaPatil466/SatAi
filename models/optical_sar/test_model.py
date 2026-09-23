@@ -142,6 +142,42 @@ def test_nonfinite_and_masked_pixels_are_excluded(tmp_path) -> None:
     )
 
 
+def test_zero_optical_denominators_are_rejected(pair, tmp_path) -> None:
+    optical = np.ones((5, 2, 2), dtype="float32")
+    optical[1] = -1
+    optical[2] = -1
+    with pytest.raises(ValueError, match="no valid NDVI/NDWI denominators"):
+        OpticalSARModel().infer(
+            [str(write_raster(tmp_path / "zero-denominator.tif", optical)), str(pair[1])],
+            "Analyze",
+        )
+
+
+def test_nonpositive_sar_samples_are_rejected(pair, tmp_path) -> None:
+    sar = np.ones((3, 2, 2), dtype="float32")
+    sar[:2] = 0
+    with pytest.raises(ValueError, match="no valid positive VV/VH samples"):
+        OpticalSARModel().infer(
+            [str(pair[0]), str(write_raster(tmp_path / "nonpositive-sar.tif", sar))],
+            "Analyze",
+        )
+
+
+def test_pair_without_covalid_pixels_is_rejected(tmp_path) -> None:
+    optical = np.ones((5, 2, 2), dtype="float32")
+    optical[4, :, 1] = 0
+    sar = np.ones((3, 2, 2), dtype="float32")
+    sar[2, :, 0] = 0
+    with pytest.raises(ValueError, match="no co-valid finite pixels"):
+        OpticalSARModel().infer(
+            [
+                str(write_raster(tmp_path / "optical.tif", optical)),
+                str(write_raster(tmp_path / "sar.tif", sar)),
+            ],
+            "Analyze",
+        )
+
+
 def test_one_modality_is_rejected(pair) -> None:
     with pytest.raises(ValueError, match="exactly two"):
         OpticalSARModel().infer([str(pair[0])], "Analyze")

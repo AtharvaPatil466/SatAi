@@ -115,8 +115,15 @@ def test_cross_modal_questions_select_optical_sar(question: str) -> None:
 
 
 def test_change_precedes_grounding_for_mixed_intent() -> None:
-    result = plan("Where did flooding increase between these two scenes?")
+    result = plan(
+        "Where did flooding increase between these two scenes?",
+        scenes=("scene_a", "scene_b"),
+    )
     assert result.selected_capability == CHANGE_VQA
+    assert result.executable is False
+    assert result.unavailable_reason == (
+        "Multi-step change-to-grounding execution is not implemented."
+    )
 
 
 @pytest.mark.parametrize(

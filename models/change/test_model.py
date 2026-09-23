@@ -57,6 +57,23 @@ def test_identical_pair_has_zero_change_and_is_deterministic(identical_pair) -> 
     assert not any(item["type"] == "change_extent" for item in first["evidence"])
 
 
+def test_threshold_is_strictly_greater_than_point_one(tmp_path) -> None:
+    before = np.ones((5, 2, 2), dtype="float32")
+    after = before.copy()
+    after[3] = 1.5
+    result = ChangeModel().infer(
+        [
+            str(write_raster(tmp_path / "t1.tif", before)),
+            str(write_raster(tmp_path / "t2.tif", after)),
+        ],
+        "What changed?",
+    )
+
+    statistics = result["evidence"][1]
+    assert statistics["change_magnitude"]["mean"] == pytest.approx(0.1)
+    assert statistics["changed_pixels"] == 0
+
+
 def test_known_rgb_region_produces_spatial_extent(tmp_path) -> None:
     before = np.zeros((3, 4, 4), dtype="float32")
     after = before.copy()

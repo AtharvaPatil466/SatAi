@@ -79,9 +79,12 @@ def test_temporal_plus_localization_produces_change_then_grounding_chain() -> No
         (CHANGE_VQA, ()),
         (GROUNDING, ("step_1",)),
     ]
-    assert execution.executable is True
+    assert execution.executable is False
     assert execution.unavailable_capabilities == ()
     assert execution.plan.rule_id == TEMPORAL_LOCALIZATION_RULE_ID
+    assert execution.plan.unavailable_reason == (
+        "Multi-step change-to-grounding execution is not implemented."
+    )
 
 
 def test_single_intent_questions_stay_single_step() -> None:

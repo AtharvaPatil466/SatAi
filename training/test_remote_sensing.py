@@ -112,6 +112,15 @@ def test_manifest_rejects_image_leakage_across_splits(tmp_path: Path) -> None:
         load_manifest(manifest(tmp_path / "samples.jsonl", records))
 
 
+def test_manifest_rejects_image_leakage_even_if_dataset_label_changes(tmp_path: Path) -> None:
+    raster = image(tmp_path / "scene.png")
+    train = record(raster, "train-one")
+    validation = record(raster, "validation-one", "validation")
+    validation["dataset"] = "different-label"
+    with pytest.raises(ValueError, match="cross train/evaluation splits"):
+        load_manifest(manifest(tmp_path / "samples.jsonl", [train, validation]))
+
+
 def test_selection_is_split_safe_bounded_and_deterministic(tmp_path: Path) -> None:
     records = []
     for index in range(8):
