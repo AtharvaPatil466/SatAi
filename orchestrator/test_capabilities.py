@@ -4,6 +4,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import unittest
+from unittest.mock import patch
+
+from models.base import ModelReadiness
+from models.grounding_dino import GroundingDINOModel
+from models.qwen_vl import QwenVLModel
 
 from orchestrator import capabilities
 from orchestrator.capabilities import (
@@ -13,20 +18,29 @@ from orchestrator.capabilities import (
     KNOWN_CAPABILITIES,
     OPTICAL_SAR,
     Provider,
+    ProviderNotReady,
     SINGLE_IMAGE_VQA,
     UnknownCapability,
     resolve_provider,
 )
+from orchestrator.router import route
+from orchestrator import trace as trace_store
 
 
 class CapabilityRegistryTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.qwen_ready = patch.object(QwenVLModel, "readiness", lambda _: ModelReadiness(True))
+        self.grounding_ready = patch.object(GroundingDINOModel, "readiness", lambda _: ModelReadiness(True))
+        self.qwen_ready.start()
+        self.grounding_ready.start()
         capabilities.reset_registry()
         capabilities.register_default_providers()
 
     def tearDown(self) -> None:
         capabilities.reset_registry()
         capabilities.register_default_providers()
+        self.grounding_ready.stop()
+        self.qwen_ready.stop()
 
     def test_known_vocabulary_matches_spec(self) -> None:
         self.assertEqual(
@@ -116,14 +130,29 @@ class CapabilityRegistryTests(unittest.TestCase):
         self.assertEqual(
             status,
             [
-                {"name": "single_image_vqa", "available": True, "provider": "qwen2.5vl-3b"},
-                {"name": "grounding", "available": True, "provider": "grounding-dino-swint"},
-                {"name": "change_vqa", "available": False, "provider": None},
-                {"name": "optical_sar", "available": False, "provider": None},
+                {"name": "single_image_vqa", "registered": True, "available": True, "state": "AVAILABLE", "provider": "qwen2.5vl-3b", "reason_code": None, "detail": None},
+                {"name": "grounding", "registered": True, "available": True, "state": "AVAILABLE", "provider": "grounding-dino-swint", "reason_code": None, "detail": None},
+                {"name": "change_vqa", "registered": False, "available": False, "state": "NOT_IMPLEMENTED", "provider": None, "reason_code": "NO_PROVIDER", "detail": "No real provider is registered for this capability."},
+                {"name": "optical_sar", "registered": False, "available": False, "state": "NOT_IMPLEMENTED", "provider": None, "reason_code": "NO_PROVIDER", "detail": "No real provider is registered for this capability."},
             ],
         )
         status.clear()
         self.assertEqual(len(capabilities.capabilities_status()), 4)
+
+    def test_registered_unready_provider_cannot_enter_inference(self) -> None:
+        with (
+            patch.object(QwenVLModel, "readiness", lambda _: ModelReadiness(False, "CUDA_UNAVAILABLE", "A CUDA GPU is required.")),
+            patch.object(QwenVLModel, "infer", side_effect=AssertionError("inference must not run")) as infer,
+        ):
+            status = capabilities.capability_readiness(SINGLE_IMAGE_VQA)
+            self.assertTrue(status["registered"])
+            self.assertFalse(status["available"])
+            self.assertEqual(status["reason_code"], "CUDA_UNAVAILABLE")
+            self.assertEqual(resolve_provider(SINGLE_IMAGE_VQA).provider_name, "qwen2.5vl-3b")
+            with self.assertRaises(ProviderNotReady):
+                route(SINGLE_IMAGE_VQA, ["/missing.png"], "Is there water?", {"execution_mode": "live"})
+            infer.assert_not_called()
+            self.assertEqual(trace_store.records(), [])
 
 
 if __name__ == "__main__":

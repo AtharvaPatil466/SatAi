@@ -15,6 +15,7 @@ from orchestrator.capabilities import (
     OPTICAL_SAR,
     KNOWN_CAPABILITIES,
     CapabilityUnavailable,
+    capability_readiness,
     resolve_provider,
 )
 from orchestrator.planner import TEMPORAL_LOCALIZATION_RULE_ID, Plan
@@ -160,7 +161,7 @@ def _resolve_step(
         capability=capability,
         depends_on=depends_on,
         required_inputs=required_inputs,
-        provider_available=True,
+        provider_available=bool(capability_readiness(capability)["available"]),
         provider=resolved.provider_name,
     )
 

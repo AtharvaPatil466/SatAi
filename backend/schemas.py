@@ -60,8 +60,12 @@ class TraceVerification(BaseModel):
 
 class CapabilityStatus(BaseModel):
     name: str
+    registered: bool
     available: bool
+    state: Literal["AVAILABLE", "UNAVAILABLE", "NOT_IMPLEMENTED"]
     provider: str | None
+    reason_code: str | None
+    detail: str | None
 
 
 class CapabilitiesResponse(BaseModel):

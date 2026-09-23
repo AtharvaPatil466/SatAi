@@ -8,6 +8,8 @@ from threading import Event
 from types import SimpleNamespace
 
 import pytest
+
+pytestmark = pytest.mark.usefixtures("ready_providers")
 import numpy as np
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -19,6 +21,8 @@ import orchestrator.trace as trace_store
 from backend.main import app
 from backend.routes import analyze as analyze_routes
 from backend.schemas import MAX_QUESTION_LENGTH
+from models.base import ModelReadiness
+from models.qwen_vl import QwenVLModel
 from orchestrator import capabilities
 from orchestrator import router as model_router
 
@@ -172,6 +176,39 @@ def test_live_failure_never_falls_back_to_cached_result(
     assert response.status_code == 503
     assert response.json() == {"detail": "Live model inference is unavailable."}
     assert trace_store.records() == []
+
+
+def test_unready_provider_is_consistent_across_status_plan_and_execution(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created = upload(client, "scene.png", image_bytes("PNG")).json()
+    monkeypatch.setattr(
+        QwenVLModel,
+        "readiness",
+        lambda _: ModelReadiness(False, "CUDA_UNAVAILABLE", "A CUDA GPU is required."),
+    )
+    monkeypatch.setattr(services, "route", lambda **_: pytest.fail("unready provider ran"))
+    request = {"scene_id": created["scene_id"], "question": "What is visible?"}
+
+    status = client.get("/api/capabilities").json()["capabilities"][0]
+    plan = client.post("/api/plan", json=request).json()
+    response = client.post("/api/analyze", json=request)
+
+    assert status["registered"] is True
+    assert status["available"] is False
+    assert status["reason_code"] == "CUDA_UNAVAILABLE"
+    assert plan["provider_available"] is False
+    assert plan["executable"] is False
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "capability": "single_image_vqa",
+        "provider": "qwen2.5vl-3b",
+        "reason_code": "CUDA_UNAVAILABLE",
+        "detail": "A CUDA GPU is required.",
+    }
+    records = trace_store.records()
+    assert len(records) == 1
+    assert records[0]["params"]["result_state"] == "unavailable"
 
 def test_unmatched_query_never_fabricates(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
@@ -585,8 +622,16 @@ def test_compatible_pair_reaches_existing_unavailable_provider_boundary(
     )
 
     assert response.status_code == 503
-    assert response.json() == {"detail": "Required capability is not currently available."}
-    assert trace_store.records() == []
+    assert response.json()["detail"] == {
+        "capability": "optical_sar",
+        "provider": None,
+        "reason_code": "NO_PROVIDER",
+        "detail": "No real provider is registered for this capability.",
+    }
+    records = trace_store.records()
+    assert len(records) == 1
+    assert records[0]["params"]["result_state"] == "unavailable"
+    assert records[0]["params"]["reason_code"] == "NO_PROVIDER"
 
 
 def test_scene_id_is_not_derived_from_malicious_filename(client: TestClient) -> None:
@@ -1090,8 +1135,12 @@ def test_provider_metadata_is_truthful() -> None:
     status = {entry["name"]: entry for entry in capabilities.capabilities_status()}
     assert status[capabilities.SINGLE_IMAGE_VQA] == {
         "name": "single_image_vqa",
+        "registered": True,
         "available": True,
+        "state": "AVAILABLE",
         "provider": "qwen2.5vl-3b",
+        "reason_code": None,
+        "detail": None,
     }
 
 
@@ -1101,10 +1150,10 @@ def test_capabilities_endpoint_reports_truthful_availability(
     payload = client.get("/api/capabilities").json()
     assert payload == {
         "capabilities": [
-            {"name": "single_image_vqa", "available": True, "provider": "qwen2.5vl-3b"},
-            {"name": "grounding", "available": True, "provider": "grounding-dino-swint"},
-            {"name": "change_vqa", "available": False, "provider": None},
-            {"name": "optical_sar", "available": False, "provider": None},
+            {"name": "single_image_vqa", "registered": True, "available": True, "state": "AVAILABLE", "provider": "qwen2.5vl-3b", "reason_code": None, "detail": None},
+            {"name": "grounding", "registered": True, "available": True, "state": "AVAILABLE", "provider": "grounding-dino-swint", "reason_code": None, "detail": None},
+            {"name": "change_vqa", "registered": False, "available": False, "state": "NOT_IMPLEMENTED", "provider": None, "reason_code": "NO_PROVIDER", "detail": "No real provider is registered for this capability."},
+            {"name": "optical_sar", "registered": False, "available": False, "state": "NOT_IMPLEMENTED", "provider": None, "reason_code": "NO_PROVIDER", "detail": "No real provider is registered for this capability."},
         ]
     }
 

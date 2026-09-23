@@ -22,7 +22,6 @@ SatQuery AI is a capability-oriented remote-sensing visual intelligence system b
 `eval/` owns authoritative metrics, smoke verification, and suite loader stubs. Reported evaluation numbers are valid only when produced by `eval/eval.py`. Answer matching is **lenient, not exact** — see `answer_matches()`: after case-folding and stripping it accepts an exact match, treats `1` as `yes`, and then accepts the expected answer appearing as a whole word inside a longer response, both before and after normalising number words (`three` → `3`). Every committed number was produced under these rules, so stating a stricter rule here would misdescribe them.
 
 ### UNAVAILABLE / IN DEVELOPMENT
-- **Grounding Provider**: Capability vocabulary and planning rules (`grounding`, `grounding_spatial_localization`) are defined, but the Grounding DINO provider is **not yet registered** in the active codebase. Grounding requests fail closed with `503 Service Unavailable`.
 - **Bi-Temporal Change-VQA (`change_vqa`)**: Planned multi-scene change detection chain is represented in the planner, but no change detection execution provider is currently registered.
 - **Optical–SAR Fusion (`optical_sar`)**: SAR false-color interpretation reference materials are available (`/sar`), but automated multimodal fusion models are not yet deployed.
 - **Remote Sensing Fine-Tuning**: Currently running frozen foundation checkpoints; domain-adapted weights are in development.

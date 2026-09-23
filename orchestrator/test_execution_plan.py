@@ -4,6 +4,8 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("ready_providers")
+
 from orchestrator.capabilities import (
     CHANGE_VQA,
     GROUNDING,

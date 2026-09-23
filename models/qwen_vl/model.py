@@ -2,10 +2,12 @@
 
 import os
 import warnings
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
-from models.base import Model
+from models.artifacts import validate_artifact
+from models.base import Model, ModelReadiness
 
 # Opt-in only. Apple MPS lets this model run on a developer Mac, which is the
 # difference between iterating locally and not being able to execute the live path
@@ -61,6 +63,31 @@ class QwenVLModel(Model):
             return "mps"
         raise RuntimeError(NO_ACCELERATOR_ERROR)
 
+    def readiness(self) -> ModelReadiness:
+        for dependency in (
+            "torch",
+            "transformers",
+            "qwen_vl_utils",
+            "accelerate",
+            "huggingface_hub",
+        ):
+            if find_spec(dependency) is None:
+                return ModelReadiness(
+                    False,
+                    "DEPENDENCY_UNAVAILABLE",
+                    f"Required dependency {dependency} is unavailable.",
+                )
+        import torch
+
+        try:
+            self._resolve_device(torch)
+        except RuntimeError as exc:
+            return ModelReadiness(False, "CUDA_UNAVAILABLE", str(exc))
+        artifact = validate_artifact(self.name, model_id=self.model_id)
+        if not artifact.available:
+            return ModelReadiness(False, artifact.reason_code, artifact.detail)
+        return ModelReadiness(True)
+
     def _load(self) -> None:
         """Load weights only on the first real inference call."""
         if self._model is not None:
@@ -74,24 +101,32 @@ class QwenVLModel(Model):
                 "Qwen inference requires transformers>=4.49, qwen-vl-utils, accelerate, and torch"
             ) from exc
         device = self._resolve_device(torch)
+        artifact = validate_artifact(self.name, model_id=self.model_id)
+        if not artifact.available or artifact.path is None:
+            raise RuntimeError(artifact.detail or "Qwen artifact unavailable")
+        model_path = str(artifact.path)
         if device == "cuda":
             self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-                self.model_id,
+                model_path,
                 torch_dtype=torch.float16,
                 device_map="auto",
+                local_files_only=True,
             )
         else:
             # device_map="auto" dispatches through accelerate, which does not place
             # reliably on Apple Silicon; move the whole model explicitly instead.
             self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-                self.model_id,
+                model_path,
                 torch_dtype=torch.float16,
+                local_files_only=True,
             ).to(device)
         self.device = device
         self._model.eval()
         for parameter in self._model.parameters():
             parameter.requires_grad_(False)
-        self._processor = AutoProcessor.from_pretrained(self.model_id)
+        self._processor = AutoProcessor.from_pretrained(
+            model_path, local_files_only=True
+        )
         self._process_vision_info = process_vision_info
 
     def _generate_answer(self, image_paths: list[str], question: str) -> str:

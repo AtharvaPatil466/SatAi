@@ -12,7 +12,7 @@ from streamlit.testing.v1 import AppTest
 
 from demo_gui import golden_assets
 from models.qwen_vl.model import QwenVLModel
-from orchestrator import trace
+from models.base import ModelReadiness
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_PATH = ROOT / "demo_gui/app.py"
@@ -47,19 +47,9 @@ class FailurePathTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.golden_path = Path(self.temp_dir.name) / "golden.png"
         Image.new("RGB", (2, 2)).save(self.golden_path)
-        # Without this the cached-fallback paths below append real records to the
-        # repository's production trace.jsonl on every test run. Same isolation as
-        # test_golden_path.py.
-        self.original_records = trace.records()
-        trace._TRACE.clear()
-        self.path_patch = patch.object(trace, "TRACE_PATH", Path(self.temp_dir.name) / "trace.jsonl")
-        self.path_patch.start()
 
     def tearDown(self) -> None:
         st.cache_data.clear()
-        self.path_patch.stop()
-        trace._TRACE.clear()
-        trace._TRACE.extend(self.original_records)
         self.temp_dir.cleanup()
 
     def assert_safe(self, app: AppTest) -> str:
@@ -77,6 +67,7 @@ class FailurePathTests(unittest.TestCase):
         with (
             patch.object(golden_assets, "local_golden_image", return_value=self.golden_path),
             patch.object(QwenVLModel, "_load", side_effect=RuntimeError(NO_GPU_ERROR)),
+            patch.object(QwenVLModel, "readiness", return_value=ModelReadiness(True)),
         ):
             app = self.ask(AppTest.from_file(str(APP_PATH)).run(timeout=30))
         text = self.assert_safe(app)
@@ -89,6 +80,7 @@ class FailurePathTests(unittest.TestCase):
         with (
             patch.object(golden_assets, "local_golden_image", return_value=self.golden_path),
             patch.object(QwenVLModel, "_load", side_effect=OSError(message)),
+            patch.object(QwenVLModel, "readiness", return_value=ModelReadiness(True)),
         ):
             app = self.ask(AppTest.from_file(str(APP_PATH)).run(timeout=30))
         text = self.assert_safe(app)

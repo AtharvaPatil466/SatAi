@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "providers": {
+    "qwen2.5vl-3b": {
+      "model_id": "Qwen/Qwen2.5-VL-3B-Instruct",
+      "revision": null,
+      "sha256": null,
+      "local_path_env": "SATQUERY_QWEN_MODEL_DIR",
+      "default_local_path": "/kaggle/input/satquery-models/qwen2.5-vl-3b-instruct",
+      "required_files": ["config.json", "preprocessor_config.json", "tokenizer_config.json", "tokenizer.json"]
+    },
+    "grounding-dino-swint": {
+      "model_id": "ShilongLiu/GroundingDINO",
+      "architecture": "GroundingDINO_SwinT_OGC.py",
+      "checkpoint": "groundingdino_swint_ogc.pth",
+      "revision": null,
+      "sha256": null,
+      "local_path_env": "SATQUERY_GROUNDING_CHECKPOINT",
+      "default_local_path": "/kaggle/input/satquery-models/groundingdino_swint_ogc.pth"
+    }
+  }
+}
