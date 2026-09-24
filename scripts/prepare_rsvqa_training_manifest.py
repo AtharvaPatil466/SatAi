@@ -39,10 +39,12 @@ def build_manifest(dataset_root: Path, output: Path) -> int:
             if item.get("active")
         }
         for question in questions:
-            question_id = int(question["id"])
-            image_id = int(question["img_id"])
-            if not question.get("active") or question_id not in answer_by_question:
+            if not question.get("active"):
                 continue
+            question_id = int(question["id"])
+            if question_id not in answer_by_question:
+                continue
+            image_id = int(question["img_id"])
             if image_id not in active_images:
                 raise ValueError(f"Question {question_id} references an inactive image")
             image = image_paths.get(f"{image_id}.tif")

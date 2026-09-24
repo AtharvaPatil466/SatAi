@@ -64,7 +64,12 @@ def test_rsvqa_builder_preserves_official_splits_without_downloading(tmp_path: P
         )
         (dataset / f"LR_split_{file_split}_questions.json").write_text(
             json.dumps(
-                {"questions": [{"id": index * 10, "img_id": index, "question": "What?", "active": True}]}
+                {
+                    "questions": [
+                        {"id": index * 10, "img_id": index, "question": "What?", "active": True},
+                        *([{"id": 999, "active": False}] if file_split == "train" else []),
+                    ]
+                }
             ),
             encoding="utf-8",
         )
@@ -80,6 +85,14 @@ def test_rsvqa_builder_preserves_official_splits_without_downloading(tmp_path: P
     loaded = load_manifest(output, dataset)
     assert {item.split for item in loaded} == {"train", "validation", "test"}
     assert {item.source for item in loaded} == {"RSVQA-LR, Zenodo record 6344334"}
+    assert {item.sample_id for item in loaded} == {"train-10", "validation-20", "test-30"}
+
+    (dataset / "LR_split_train_questions.json").write_text(
+        json.dumps({"questions": [{"id": 10, "question": "What?", "active": True}]}),
+        encoding="utf-8",
+    )
+    with pytest.raises(KeyError, match="img_id"):
+        build_manifest(dataset, output)
 
 
 @pytest.mark.parametrize("field", ["instruction", "response", "dataset", "source", "split", "sample_id"])
