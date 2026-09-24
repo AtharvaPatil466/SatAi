@@ -1,4 +1,4 @@
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 
 from backend.schemas import (
@@ -14,14 +14,17 @@ from backend.services import (
     InvalidImageUpload,
     ModelExecutionError,
     ModelUnavailable,
+    PairCompatibilityError,
     SceneStorageError,
+    SceneNotFound,
     analyze_scene,
     capabilities_overview,
     ingest_scene,
     local_scene_image,
     plan_analysis,
 )
-from orchestrator.capabilities import CapabilityUnavailable, UnknownCapability
+from backend.scene_pack import ScenePackError, scene_catalog
+from orchestrator.capabilities import CapabilityUnavailable, ProviderNotReady, UnknownCapability
 from orchestrator.planner import InvalidPlanRequest
 from orchestrator.router import InvalidModelOutput, TracePersistenceError
 
@@ -30,18 +33,45 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 
 @router.post("/scenes", response_model=SceneUploadResponse, status_code=status.HTTP_201_CREATED)
-async def upload_scene(file: UploadFile = File(...)) -> SceneUploadResponse:
+async def upload_scene(
+    file: UploadFile = File(...),
+    modality: str | None = Form(default=None),
+    sensor: str | None = Form(default=None),
+    acquisition_timestamp: str | None = Form(default=None),
+    polarization: str | None = Form(default=None),
+    pair_group: str | None = Form(default=None),
+    benchmark_source: str | None = Form(default=None),
+) -> SceneUploadResponse:
     data = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="The uploaded image exceeds the 20 MiB limit.")
     try:
         return SceneUploadResponse.model_validate(
-            ingest_scene(data, file.filename or "upload")
+            ingest_scene(
+                data,
+                file.filename or "upload",
+                {
+                    "modality": modality,
+                    "sensor": sensor,
+                    "acquisition_timestamp": acquisition_timestamp,
+                    "polarization": polarization,
+                    "pair_group": pair_group,
+                    "benchmark_source": benchmark_source,
+                },
+            )
         )
     except InvalidImageUpload as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except SceneStorageError as exc:
         raise HTTPException(status_code=500, detail="The uploaded image could not be stored.") from exc
+
+
+@router.get("/scenes")
+def scenes() -> dict:
+    try:
+        return scene_catalog()
+    except ScenePackError as exc:
+        raise HTTPException(status_code=503, detail="Curated scene pack is unavailable.") from exc
 
 
 @router.get("/capabilities", response_model=CapabilitiesResponse)
@@ -58,26 +88,50 @@ def plan(request: AnalyzeRequest) -> PlanResponse:
                 request.question,
                 request.sensor,
                 request.capability,
+                request.scene_id_2,
             )
         )
     except (InvalidPlanRequest, UnknownCapability) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/analyze", response_model=AnalyzeResponse)
+@router.post(
+    "/analyze", response_model=AnalyzeResponse, response_model_exclude_unset=True
+)
 def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     try:
         return AnalyzeResponse.model_validate(
-            analyze_scene(request.scene_id, request.question, request.sensor, request.capability)
+            analyze_scene(
+                request.scene_id,
+                request.question,
+                request.sensor,
+                request.capability,
+                request.scene_id_2,
+                request.execution_mode,
+            )
         )
     except ArtifactError as exc:
         raise HTTPException(
             status_code=503, detail="Required analysis artifacts are temporarily unavailable."
         ) from exc
+    except SceneNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (AnalysisUnavailable, InvalidPlanRequest) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except PairCompatibilityError as exc:
+        raise HTTPException(status_code=422, detail=exc.result) from exc
     except UnknownCapability as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ProviderNotReady as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "capability": exc.capability,
+                "provider": exc.provider,
+                "reason_code": exc.reason_code,
+                "detail": exc.detail,
+            },
+        ) from exc
     except CapabilityUnavailable as exc:
         raise HTTPException(
             status_code=503,
@@ -103,4 +157,5 @@ def scene_image(scene_id: str) -> FileResponse:
     image_path = local_scene_image(scene_id)
     if image_path is None:
         raise HTTPException(status_code=404, detail="Local scene pixels are unavailable.")
-    return FileResponse(image_path, media_type="image/png")
+    media_type = "image/jpeg" if image_path.suffix.lower() in {".jpg", ".jpeg"} else "image/png"
+    return FileResponse(image_path, media_type=media_type)

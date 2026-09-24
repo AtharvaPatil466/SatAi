@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from threading import Event
 from typing import Any
 
-from orchestrator.capabilities import ResolvedProvider, resolve_provider
+from orchestrator.capabilities import ResolvedProvider, require_provider_ready
 from orchestrator.registry import get
 from orchestrator.trace import TraceIntegrityError, append_record
 
@@ -84,7 +84,7 @@ def route(
     execution trace and cannot be forged by caller params; caller params
     remain otherwise unchanged.
     """
-    resolved = resolve_provider(capability)
+    resolved = require_provider_ready(capability)
     model = get(resolved.model_name)
     if timeout_seconds is None:
         result = model.infer(image_paths=image_paths, question=question)

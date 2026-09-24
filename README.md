@@ -11,23 +11,24 @@ SatQuery AI is a capability-oriented remote-sensing visual intelligence system b
 ## Current Status
 
 ### AVAILABLE
-- **Controlled Image Ingestion**: Upload validation (`POST /api/scenes`) supporting PNG and JPEG up to 20 MiB with decompression-bomb guards, format normalization, and path-traversal prevention.
-- **Deterministic Planner**: Rule-based request planning (`POST /api/plan`) that analyzes input questions, scene requirements, and sensor intent to select appropriate capabilities without LLM non-determinism.
-- **Structured Execution Plan**: Generation of explicit, multi-step dependency graphs (`execution_plan_version: 0.1.0`) separating plan representation from execution.
-- **Single-Image VQA Path**: Complete visual-question-answering execution pipeline for optical imagery via `Qwen/Qwen2.5-VL-3B-Instruct`.
-- **Cryptographic Audit Trace**: SHA-256 hash-chained, append-only execution log (`trace.jsonl`, `GET /api/traces`, `POST /api/traces/verify`) guaranteeing verifiable provenance for every routed decision.
-- **Golden Cached Fallback**: Exact, verified committed fallback (`results/qwen2.5vl-3b__ladder__rescored__20260904.json`) for the designated benchmark query when running offline or without GPU acceleration.
-- **Frontend / Backend Integration**: Full-stack integration between the Next.js 16 workspace UI and the FastAPI backend service.
+- **Controlled image ingestion**: `POST /api/scenes` validates PNG, JPEG, TIFF, and GeoTIFF uploads up to 20 MiB. Raster metadata is observed separately from user declarations.
+- **Deterministic orchestration**: `POST /api/plan` selects capabilities, checks input shape and provider readiness, and emits auditable execution steps. Unsupported multi-step plans fail closed.
+- **Single-image VQA**: `Qwen/Qwen2.5-VL-3B-Instruct` executes from offline local artifacts on CUDA, with opt-in MPS for local iteration. Confidence is `null` when uncalibrated.
+- **Grounding**: Grounding DINO Swin-T returns normalized bounding-box evidence with fixed thresholds (`box=0.35`, `text=0.25`).
+- **Pair compatibility**: Optical-SAR and bi-temporal requests are checked for modality, acquisition metadata, overlap, dimensions, CRS, and affine grid before dispatch.
+- **Deterministic optical-SAR analysis**: Joint Sentinel-2 index and Sentinel-1 backscatter summaries consume both co-registered inputs. This is not a learned fusion model.
+- **Deterministic change analysis**: Co-registered multispectral or RGB pairs produce heuristic magnitude, changed-pixel, coverage, and spatial-extent evidence. This is not semantic change understanding.
+- **Cryptographic audit trace**: Live and cached-result executions are distinguished in a SHA-256 hash-chained trace.
+- **Explicit cached replay**: The designated committed VQA result is returned only when the caller requests `execution_mode: "cached_result"`; live failure never silently falls back.
 
-`eval/` owns authoritative metrics, smoke verification, and suite loader stubs. Reported evaluation numbers are valid only when produced by `eval/eval.py`. Answer matching is **lenient, not exact** — see `answer_matches()`: after case-folding and stripping it accepts an exact match, treats `1` as `yes`, and then accepts the expected answer appearing as a whole word inside a longer response, both before and after normalising number words (`three` → `3`). Every committed number was produced under these rules, so stating a stricter rule here would misdescribe them.
+Historical Kaggle Tesla T4 smoke verification passed through the repository provider path for Qwen and Grounding DINO. See `docs/gpu-smoke.md`. This proves runtime execution, not model accuracy or throughput.
 
-### UNAVAILABLE / IN DEVELOPMENT
-- **Grounding Provider**: Capability vocabulary and planning rules (`grounding`, `grounding_spatial_localization`) are defined, but the Grounding DINO provider is **not yet registered** in the active codebase. Grounding requests fail closed with `503 Service Unavailable`.
-- **Bi-Temporal Change-VQA (`change_vqa`)**: Planned multi-scene change detection chain is represented in the planner, but no change detection execution provider is currently registered.
-- **Optical–SAR Fusion (`optical_sar`)**: SAR false-color interpretation reference materials are available (`/sar`), but automated multimodal fusion models are not yet deployed.
-- **Remote Sensing Fine-Tuning**: Currently running frozen foundation checkpoints; domain-adapted weights are in development.
+### PARTIAL / BLOCKED ON GPU OR DATA
+- **Remote-sensing adaptation**: The offline RSVQA-LR QLoRA pipeline and held-out comparison runner are ready. No adapter has been trained and no improvement is claimed.
+- **Multi-step change-to-grounding execution**: The plan can be represented, but execution remains explicitly unavailable until an intermediate spatial artifact contract exists.
+- **Benchmark and ISRO/SAC evidence**: Existing frozen evaluations and runners do not establish adapted-model, CDVQA, optical-SAR, national, or ISRO/SAC performance.
 
-*Unavailable capabilities intentionally fail closed and never silently fall back to unrelated models or fabricated outputs.*
+See `docs/research/ps-requirement-gap-matrix.md` for requirement-level status and next evidence.
 
 ---
 
@@ -52,16 +53,15 @@ cd sih2026
 
 ### Minimal API Environment
 
-For running the API service and offline verification:
+For running the API service and CPU-safe contract tests:
 
 ```bash
 python3 -m venv backend/.venv
 source backend/.venv/bin/activate
 pip install -r backend/requirements.txt
-pip install pillow
 ```
 
-> **Important**: `backend/services.py` requires `PIL` (Pillow) for safe image verification, format conversion, and dimensions extraction. Because `pillow` is defined in root `requirements.txt` rather than `backend/requirements.txt`, install `pillow` explicitly when setting up a minimal environment.
+The backend requirements include Pillow, NumPy, and Rasterio because upload and pair-validation paths import them directly.
 
 ### Full Development / Test Environment
 
@@ -74,7 +74,7 @@ pip install -r backend/requirements.txt
 pip install -r requirements.txt
 ```
 
-> **macOS Note**: If `rasterio` fails to install due to system GDAL bindings, omit it for local API and frontend development. Core VQA, ingestion, planning, and evaluation paths do not require `rasterio`.
+> **macOS note**: Rasterio is required by TIFF ingestion and deterministic pair providers. Use a compatible wheel or environment rather than omitting it.
 
 ---
 
@@ -292,9 +292,9 @@ curl -X POST http://localhost:8000/api/traces/verify
 
 ---
 
-## Golden Offline / Cached Demo
+## Explicit cached replay
 
-To enable zero-dependency evaluations and demonstrations without local GPU infrastructure, the repository includes a pinned golden path:
+For a narrow offline demonstration, the repository includes one pinned result that must be requested explicitly with `execution_mode: "cached_result"`:
 
 - **Pinned Scene ID**: `loveda_LoveDA_images_png_0_gsd0.3`
 - **Pinned Question**: `Is there a building in this image?`
@@ -302,29 +302,27 @@ To enable zero-dependency evaluations and demonstrations without local GPU infra
 - **Artifact Source**: [`results/qwen2.5vl-3b__ladder__rescored__20260904.json`](results/qwen2.5vl-3b__ladder__rescored__20260904.json)
 
 ### Exact Fallback Invariants
-1. **Intentionally Narrow**: Fallback activates *only* when the scene ID, question, and capability match the exact pinned values.
+1. **Intentionally Narrow**: Replay succeeds *only* when the scene ID, question, and capability match the exact pinned values and cached mode was explicitly requested.
 2. **Provenance Disclosure**: Responses explicitly return `execution_mode: "cached_result"` and state the source artifact path.
 3. **Not a Generic Cache**: Dynamic queries, arbitrary questions, and uploaded user scenes are **never** served from cache.
-4. **No Fallback for In-Development Capabilities**: Grounding, change detection, and multimodal fusion queries never fall through to the golden VQA answer.
+4. **No unrelated replay**: Grounding, change, and optical-SAR requests never use the cached VQA artifact.
 
 ---
 
 ## GPU / CUDA Behavior
 
-- **Live Model Inference**: Real-time forward passes with `Qwen2.5-VL-3B` require PyTorch with CUDA acceleration (`torch.cuda.is_available() == True`).
-- **Fail-Closed Design**: When run in an environment without CUDA or without downloaded model weights, live requests on non-golden queries fail closed with `503 Service Unavailable` (`"Live model inference is unavailable."`).
+- **Live model inference**: Reportable Qwen and Grounding DINO runs require PyTorch with CUDA. Qwen also has an explicit MPS development mode whose outputs are not CUDA baseline measurements.
+- **Fail-closed design**: Live Qwen or Grounding DINO requests fail with `503 Service Unavailable` when CUDA, dependencies, configuration, or local artifacts are unavailable. Cached replay is never selected automatically.
 - **Engineering Rule**: Do **not** modify failure handling to silently generate mock answers or synthetic confidence values on CPU. Factual failure is a safety invariant.
 
 ---
 
-## Grounding Status
+## Grounding status
 
-- **Capability Identifier**: `grounding`
-- **Planning Rule**: Queries containing spatial localization markers (*"where"*, *"locate"*, *"bounding box"*) are mapped by the planner to `selected_capability: "grounding"`, producing a plan with `rule_id: "grounding_spatial_localization"`.
-- **Current Execution Status**: **Unavailable**. No grounding model provider (e.g. Grounding DINO) is currently registered in `orchestrator/capabilities.py`.
-- **Honest Failure**: Attempting to execute grounding returns `503 Service Unavailable` (`"Required capability is not currently available."`).
-- **No Hallucinations**: Neither the backend nor the frontend fabricates bounding boxes when a grounding model is absent.
-- **Evaluation**: Zero-shot DIOR-RSVG evaluation pipelines are in development and will be committed alongside model weights.
+- **Provider**: `grounding-dino-swint`, using the official Swin-T OGC configuration and local checkpoint contract.
+- **Routing**: Spatial localization queries select `grounding` and execute only when CUDA, dependencies, configuration, and checkpoint are ready.
+- **Evidence**: Normalized `xyxy` boxes, labels, and finite model detection scores. Empty detections remain explicit.
+- **Verification boundary**: Historical Kaggle T4 smoke passed. The DIOR-RSVG runner exists, but no new benchmark result was produced during the canonical migration.
 
 ---
 
@@ -342,7 +340,7 @@ python3 -m pytest backend/test_api.py -q
 python3 -m pytest -q
 ```
 
-*Verified status in current environment: all unit, contract, and route tests pass cleanly (76 passed on API suite, 254 passed across full test harness).*
+*Run the command above on the reviewed commit for the current authoritative count; migration checkpoint counts are recorded in commit handoff notes.*
 
 ---
 
@@ -377,8 +375,8 @@ Finalizing page optimization ...
 | Issue | Cause | Resolution |
 | :--- | :--- | :--- |
 | **Backend returns 503 on `/api/analyze`** | Running without CUDA hardware or local model weights. | Expected behavior. Test using the golden demo query or deploy on a CUDA-enabled GPU. |
-| **Capability unavailable (503)** | Requesting `grounding`, `change_vqa`, or `optical_sar`. | These capabilities are currently in development and fail closed. |
-| **Upload rejected (422 / 413)** | Uploaded file is corrupt, not a PNG/JPEG, or exceeds 20 MiB. | Provide a standard PNG or JPEG image tile under 20 MiB. |
+| **Provider unavailable (503)** | Required CUDA, dependency, configuration, or local model artifact is absent; or the requested multi-step plan is not executable. | Inspect `/api/capabilities`, provision artifacts offline, or use a supported deterministic single-step capability. |
+| **Upload rejected (422 / 413)** | The upload is corrupt, unsupported, unsafe, or exceeds 20 MiB. | Provide a valid PNG, JPEG, TIFF, or GeoTIFF within the documented limits. |
 | **Frontend cannot connect to backend** | Backend server is stopped or running on a different port. | Ensure backend is active at `http://localhost:8000`. Check with `curl http://localhost:8000/api/health`. |
 | **Trace integrity error (503)** | `trace.jsonl` has been manually edited or corrupted. | The hash chain verifies previous record hashes. Remove `trace.jsonl` to reinitialize a clean audit chain. |
 | **`ModuleNotFoundError: No module named 'PIL'`** | Minimal backend venv created without Pillow. | Run `pip install pillow` inside your backend virtual environment. |
@@ -404,8 +402,8 @@ Finalizing page optimization ...
   - **Aggregate Accuracy**: `0.5142`
   - **Binary Prediction Yes-Rate**: `0.3675` *(Passed two-sided degeneracy guard [0.15, 0.85])*
 - **Resolution Robustness Ladder**: Evaluated on 200 real LoveDA scenes degraded across 5 rungs (0.3m, 1m, 2m, 5m, 10m). Rungs at 5m and 10m exhibit collapse to the gold yes-prior and are flagged as degenerate.
-- **Phase 1 Progress**: Deterministic planner, structured multi-step execution plans, and controlled scene ingestion complete. Grounding DINO integration and threshold evaluation underway.
+- **Post-Phase-0 progress**: Grounding, pair validation, deterministic optical-SAR and change providers, offline readiness, GPU smoke infrastructure, and the RSVQA-LR adaptation pipeline are implemented. Learned adaptation and the remaining held-out evaluations have not run.
 
 ## Development Status
 
-Active development resumed after the SatQuery demo sprint. Remote-sensing adaptation and benchmark evaluation are the next implementation phase.
+The next execution phase is RSVQA-LR provisioning, a bounded QLoRA dry run/training job, base-versus-adapter validation, and one real bi-temporal smoke. No adapted model exists yet.

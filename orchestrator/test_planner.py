@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("ready_providers")
+
 from orchestrator.capabilities import (
     CHANGE_VQA,
     GROUNDING,
@@ -69,9 +71,9 @@ def test_localization_questions_select_grounding(question: str) -> None:
     result = plan(question)
     assert result.selected_capability == GROUNDING
     assert result.rule_id == "grounding_spatial_localization"
-    assert result.provider_available is False
-    assert result.provider is None
-    assert result.executable is False
+    assert result.provider_available is True
+    assert result.provider == "grounding-dino-swint"
+    assert result.executable is True
 
 
 @pytest.mark.parametrize(
@@ -90,6 +92,8 @@ def test_temporal_questions_select_change_vqa(question: str) -> None:
     assert result.selected_capability == CHANGE_VQA
     assert result.rule_id == "change_temporal_compare"
     assert result.missing_inputs == ("second_scene",)
+    assert result.provider_available is True
+    assert result.provider == "change-deterministic"
     assert result.executable is False
 
 
@@ -111,8 +115,15 @@ def test_cross_modal_questions_select_optical_sar(question: str) -> None:
 
 
 def test_change_precedes_grounding_for_mixed_intent() -> None:
-    result = plan("Where did flooding increase between these two scenes?")
+    result = plan(
+        "Where did flooding increase between these two scenes?",
+        scenes=("scene_a", "scene_b"),
+    )
     assert result.selected_capability == CHANGE_VQA
+    assert result.executable is False
+    assert result.unavailable_reason == (
+        "Multi-step change-to-grounding execution is not implemented."
+    )
 
 
 @pytest.mark.parametrize(
@@ -145,7 +156,7 @@ def test_pair_capabilities_report_missing_second_scene() -> None:
     for capability in (CHANGE_VQA, OPTICAL_SAR):
         result = plan("Question", capability=capability)
         assert result.missing_inputs == ("second_scene",)
-        assert result.provider_available is False
+        assert result.provider_available is True
 
 
 def test_pair_capability_with_two_scenes_has_no_missing_inputs() -> None:
@@ -155,7 +166,7 @@ def test_pair_capability_with_two_scenes_has_no_missing_inputs() -> None:
         capability=CHANGE_VQA,
     )
     assert result.missing_inputs == ()
-    assert result.executable is False
+    assert result.executable is True
 
 
 def test_no_scene_is_reported_as_missing() -> None:

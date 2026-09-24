@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 import time
@@ -7,25 +8,36 @@ from threading import Event
 from types import SimpleNamespace
 
 import pytest
+
+pytestmark = pytest.mark.usefixtures("ready_providers")
+import numpy as np
 from fastapi.testclient import TestClient
 from PIL import Image
+from rasterio.io import MemoryFile
+from rasterio.transform import from_origin
 
 import backend.services as services
 import orchestrator.trace as trace_store
 from backend.main import app
 from backend.routes import analyze as analyze_routes
 from backend.schemas import MAX_QUESTION_LENGTH
+from models.base import ModelReadiness
+from models.qwen_vl import QwenVLModel
 from orchestrator import capabilities
 from orchestrator import router as model_router
 
 
 @pytest.fixture(autouse=True)
 def isolated_trace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    services.load_results.cache_clear()
     trace_store._TRACE.clear()
     trace_store._LOADED_PATH = None
     monkeypatch.setattr(trace_store, "TRACE_PATH", tmp_path / "trace.jsonl")
     monkeypatch.setattr(services, "INGESTED_SCENE_DIR", tmp_path / "scenes")
+    monkeypatch.setattr(services, "INGESTED_RASTER_DIR", tmp_path / "rasters")
+    monkeypatch.setattr(services, "SCENE_MANIFEST_DIR", tmp_path / "manifests")
     yield
+    services.load_results.cache_clear()
     trace_store._TRACE.clear()
     trace_store._LOADED_PATH = None
 
@@ -41,10 +53,43 @@ def image_bytes(format_name: str, size: tuple[int, int] = (4, 3)) -> bytes:
     return output.getvalue()
 
 
-def upload(client: TestClient, filename: str, data: bytes) -> object:
+def tiff_bytes(
+    *,
+    georeferenced: bool = True,
+    bands: int = 2,
+    size: tuple[int, int] = (6, 4),
+    dtype: str = "uint16",
+) -> bytes:
+    width, height = size
+    profile: dict[str, object] = {
+        "driver": "GTiff",
+        "width": width,
+        "height": height,
+        "count": bands,
+        "dtype": dtype,
+        "nodata": 0,
+    }
+    if georeferenced:
+        profile.update(crs="EPSG:32643", transform=from_origin(500000, 2000000, 10, 10))
+    with MemoryFile() as memory:
+        with memory.open(**profile) as dataset:
+            for band in range(1, bands + 1):
+                values = np.arange(width * height).reshape(height, width) + band
+                dataset.write(values.astype(dtype), band)
+        return memory.read()
+
+
+def upload(
+    client: TestClient,
+    filename: str,
+    data: bytes,
+    metadata: dict[str, str] | None = None,
+    content_type: str = "application/octet-stream",
+) -> object:
     return client.post(
         "/api/scenes",
-        files={"file": (filename, data, "application/octet-stream")},
+        files={"file": (filename, data, content_type)},
+        data=metadata or {},
     )
 
 
@@ -89,7 +134,7 @@ def test_sar_returns_human_labeled_annotation(client: TestClient) -> None:
     assert set(payload["summaries"]) == {"water", "built_up", "vegetation", "terrain"}
 
 
-def test_golden_analysis_falls_back_to_exact_cache(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_golden_analysis_replays_only_when_explicitly_requested(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     def no_gpu(**_: object) -> dict:
         raise RuntimeError("Qwen2.5-VL inference requires a CUDA GPU")
 
@@ -100,6 +145,7 @@ def test_golden_analysis_falls_back_to_exact_cache(client: TestClient, monkeypat
             "scene_id": services.GOLDEN_SCENE_ID,
             "question": services.GOLDEN_QUESTION,
             "sensor": "LoveDA",
+            "execution_mode": "cached_result",
         },
     )
     assert response.status_code == 200
@@ -110,6 +156,59 @@ def test_golden_analysis_falls_back_to_exact_cache(client: TestClient, monkeypat
     assert payload["trace"]["params"]["planner_version"] == "phase0-rules-v1"
     assert payload["trace"]["params"]["planner_rule"] == "default_single_image_vqa"
 
+
+
+def test_live_failure_never_falls_back_to_cached_result(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        services,
+        "route",
+        lambda **_: (_ for _ in ()).throw(RuntimeError("CUDA GPU unavailable")),
+    )
+    response = client.post(
+        "/api/analyze",
+        json={
+            "scene_id": services.GOLDEN_SCENE_ID,
+            "question": services.GOLDEN_QUESTION,
+        },
+    )
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Live model inference is unavailable."}
+    assert trace_store.records() == []
+
+
+def test_unready_provider_is_consistent_across_status_plan_and_execution(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created = upload(client, "scene.png", image_bytes("PNG")).json()
+    monkeypatch.setattr(
+        QwenVLModel,
+        "readiness",
+        lambda _: ModelReadiness(False, "CUDA_UNAVAILABLE", "A CUDA GPU is required."),
+    )
+    monkeypatch.setattr(services, "route", lambda **_: pytest.fail("unready provider ran"))
+    request = {"scene_id": created["scene_id"], "question": "What is visible?"}
+
+    status = client.get("/api/capabilities").json()["capabilities"][0]
+    plan = client.post("/api/plan", json=request).json()
+    response = client.post("/api/analyze", json=request)
+
+    assert status["registered"] is True
+    assert status["available"] is False
+    assert status["reason_code"] == "CUDA_UNAVAILABLE"
+    assert plan["provider_available"] is False
+    assert plan["executable"] is False
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "capability": "single_image_vqa",
+        "provider": "qwen2.5vl-3b",
+        "reason_code": "CUDA_UNAVAILABLE",
+        "detail": "A CUDA GPU is required.",
+    }
+    records = trace_store.records()
+    assert len(records) == 1
+    assert records[0]["params"]["result_state"] == "unavailable"
 
 def test_unmatched_query_never_fabricates(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
@@ -134,7 +233,7 @@ def test_trace_history_and_verification(client: TestClient, monkeypatch: pytest.
     monkeypatch.setattr(services, "route", lambda **_: (_ for _ in ()).throw(RuntimeError("no GPU")))
     client.post(
         "/api/analyze",
-        json={"scene_id": services.GOLDEN_SCENE_ID, "question": services.GOLDEN_QUESTION, "sensor": "LoveDA"},
+        json={"scene_id": services.GOLDEN_SCENE_ID, "question": services.GOLDEN_QUESTION, "sensor": "LoveDA", "execution_mode": "cached_result"},
     )
     history = client.get("/api/traces").json()
     assert history["count"] == 1
@@ -142,7 +241,30 @@ def test_trace_history_and_verification(client: TestClient, monkeypatch: pytest.
     assert verification == {"verified": True, "message": "Chain verified (1 records)"}
 
 
+def test_modified_cached_artifact_fails_closed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    modified = tmp_path / "ladder.json"
+    modified.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(services, "RESULTS_PATH", modified)
+    services.load_results.cache_clear()
+    response = client.post(
+        "/api/analyze",
+        json={
+            "scene_id": services.GOLDEN_SCENE_ID,
+            "question": services.GOLDEN_QUESTION,
+            "execution_mode": "cached_result",
+        },
+    )
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Required analysis artifacts are temporarily unavailable."
+    }
+    assert trace_store.records() == []
+
+
 @pytest.mark.parametrize("endpoint", [("get", "/api/traces"), ("post", "/api/traces/verify")])
+
 def test_corrupt_trace_returns_sanitized_503(
     client: TestClient, endpoint: tuple[str, str]
 ) -> None:
@@ -213,7 +335,34 @@ def test_png_upload_returns_factual_metadata(client: TestClient) -> None:
         "location": None,
         "acquisition_date": None,
     }
+    manifest = json.loads(
+        (services.SCENE_MANIFEST_DIR / f"{payload['scene_id']}.json").read_text()
+    )
+    assert manifest["source"]["native_path"] is None
+    assert manifest["source"]["format"] == "PNG"
+    assert manifest["raster"] is None
 
+
+
+def test_uploaded_pixels_do_not_inherit_curated_scene_identity(
+    client: TestClient,
+) -> None:
+    asset = services.local_scene_image(services.GOLDEN_SCENE_ID)
+    assert asset is not None
+    response = upload(client, "copied-golden.png", asset.read_bytes(), content_type="image/png")
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["scene_id"].startswith("scene_")
+    assert payload["sensor"] is None
+    assert payload["gsd"] is None
+    assert payload["location"] is None
+    assert payload["acquisition_date"] is None
+    scene_id = payload["scene_id"]
+    manifest = json.loads(
+        (services.SCENE_MANIFEST_DIR / f"{scene_id}.json").read_text()
+    )
+    assert manifest["identity"]["provenance"] == {}
+    assert manifest["grouping"]["original_split"] is None
 
 def test_jpeg_upload_is_served_as_canonical_png(client: TestClient) -> None:
     response = upload(client, "satellite.jpg", image_bytes("JPEG"))
@@ -227,6 +376,325 @@ def test_jpeg_upload_is_served_as_canonical_png(client: TestClient) -> None:
     with Image.open(BytesIO(retrieved.content)) as image:
         assert image.format == "PNG"
         assert image.size == (4, 3)
+
+
+def test_geotiff_content_is_preserved_and_manifested_regardless_of_name(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(services, "MAX_PREVIEW_DIMENSION", 3)
+    original = tiff_bytes()
+    response = upload(client, "renamed.bin", original)
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["format"] == "TIFF"
+    assert payload["filename"] == "renamed.bin"
+    scene_id = payload["scene_id"]
+    native = services.INGESTED_RASTER_DIR / f"{scene_id}.tif"
+    preview = services.INGESTED_SCENE_DIR / f"{scene_id}.png"
+    manifest_path = services.SCENE_MANIFEST_DIR / f"{scene_id}.json"
+    assert native.read_bytes() == original
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["version"] == "1.0"
+    assert manifest["source"] == {
+        "filename": "renamed.bin",
+        "format": "TIFF",
+        "native_path": f"data/runtime/rasters/{scene_id}.tif",
+        "sha256": hashlib.sha256(original).hexdigest(),
+    }
+    raster = manifest["raster"]
+    assert raster["crs_epsg"] == 32643
+    assert raster["transform"] == [10.0, 0.0, 500000.0, 0.0, -10.0, 2000000.0]
+    assert raster["bounds"] == [500000.0, 1999960.0, 500060.0, 2000000.0]
+    assert raster["resolution"] == [10.0, 10.0]
+    assert raster["band_count"] == 2
+    assert raster["dtypes"] == ["uint16", "uint16"]
+    assert raster["nodata"] == [0.0, 0.0]
+    assert raster["georeferencing_status"] == "affine"
+    assert raster["pairing_ready"] is True
+    assert manifest["preview"]["width"] == 3
+    assert manifest["preview"]["height"] == 2
+    assert preview.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    served = client.get(f"/api/scenes/{scene_id}/image")
+    assert served.status_code == 200
+    assert served.content == preview.read_bytes()
+    assert served.content != original
+
+
+def test_plain_tiff_records_missing_georeferencing(client: TestClient) -> None:
+    response = upload(client, "plain.tiff", tiff_bytes(georeferenced=False, bands=1))
+
+    assert response.status_code == 201
+    scene_id = response.json()["scene_id"]
+    manifest = json.loads(
+        (services.SCENE_MANIFEST_DIR / f"{scene_id}.json").read_text(encoding="utf-8")
+    )
+    raster = manifest["raster"]
+    assert raster["crs_wkt"] is None
+    assert raster["crs_epsg"] is None
+    assert raster["georeferencing_status"] == "missing_crs"
+    assert raster["pairing_ready"] is False
+
+
+def test_tiff_safety_limit_rejects_without_residue(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(services, "MAX_RASTER_PIXELS", 10)
+
+    response = upload(client, "large.tif", tiff_bytes(size=(6, 4)))
+
+    assert response.status_code == 422
+    assert not services.INGESTED_SCENE_DIR.exists()
+    assert not services.INGESTED_RASTER_DIR.exists()
+    assert not services.SCENE_MANIFEST_DIR.exists()
+
+
+def test_tiff_band_limit_rejects_without_residue(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(services, "MAX_RASTER_BANDS", 1)
+
+    response = upload(client, "too-many-bands.tif", tiff_bytes(bands=2))
+
+    assert response.status_code == 422
+    assert not services.INGESTED_SCENE_DIR.exists()
+
+
+def test_tiff_unsupported_complex_content_is_rejected(client: TestClient) -> None:
+    response = upload(client, "complex.tif", tiff_bytes(bands=1, dtype="complex64"))
+
+    assert response.status_code == 422
+    assert not services.INGESTED_SCENE_DIR.exists()
+
+
+def test_malformed_tiff_signature_is_rejected_without_residue(client: TestClient) -> None:
+    response = upload(client, "not-really.png", b"II*\x00broken")
+
+    assert response.status_code == 422
+    assert not services.INGESTED_SCENE_DIR.exists()
+    assert not services.INGESTED_RASTER_DIR.exists()
+    assert not services.SCENE_MANIFEST_DIR.exists()
+
+
+def test_spoofed_filename_and_mime_do_not_override_tiff_content(
+    client: TestClient,
+) -> None:
+    response = upload(
+        client,
+        "looks-optical.jpg",
+        tiff_bytes(),
+        {"modality": "sar", "polarization": "VV"},
+        "image/jpeg",
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["format"] == "TIFF"
+    manifest = json.loads(
+        (services.SCENE_MANIFEST_DIR / f"{payload['scene_id']}.json").read_text()
+    )
+    assert manifest["identity"]["modality"] == "sar"
+    assert manifest["identity"]["polarizations"] == ["VV"]
+
+
+@pytest.mark.parametrize(("format_name", "filename"), [("PNG", "benchmark.tif"), ("JPEG", "benchmark.bin")])
+def test_png_jpeg_accept_declared_benchmark_provenance(
+    client: TestClient, format_name: str, filename: str
+) -> None:
+    response = upload(
+        client,
+        filename,
+        image_bytes(format_name),
+        {
+            "modality": "multispectral",
+            "sensor": "Sentinel-2 MSI",
+            "acquisition_timestamp": "2026-01-02T03:04:05Z",
+            "pair_group": "pilot-pair-7",
+            "benchmark_source": "audited-pilot",
+        },
+        "image/tiff",
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["format"] == format_name
+    assert payload["sensor"] == "Sentinel-2 MSI"
+    assert payload["acquisition_date"] == "2026-01-02T03:04:05+00:00"
+    manifest = json.loads(
+        (services.SCENE_MANIFEST_DIR / f"{payload['scene_id']}.json").read_text()
+    )
+    assert manifest["identity"]["benchmark_source"] == "audited-pilot"
+    assert manifest["identity"]["provenance"]["benchmark_source"] == "user_declared_upload"
+    assert manifest["grouping"]["pair_group"] == "pilot-pair-7"
+    assert manifest["raster"] is None
+
+
+@pytest.mark.parametrize(
+    ("metadata", "message"),
+    [
+        ({"modality": "thermal"}, "Unsupported declared modality."),
+        (
+            {"acquisition_timestamp": "2026-01-02T03:04:05"},
+            "Acquisition timestamp must include a timezone.",
+        ),
+    ],
+)
+def test_invalid_declared_metadata_is_rejected(
+    client: TestClient, metadata: dict[str, str], message: str
+) -> None:
+    response = upload(client, "scene.png", image_bytes("PNG"), metadata)
+    assert response.status_code == 422
+    assert response.json() == {"detail": message}
+    assert not services.INGESTED_SCENE_DIR.exists()
+
+
+def test_incompatible_pair_returns_structured_result_without_model_dispatch(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    common = {
+        "modality": "optical",
+        "sensor": "test-optical",
+        "acquisition_timestamp": "2026-01-01T00:00:00Z",
+        "pair_group": "pair-1",
+    }
+    first = upload(client, "one.tif", tiff_bytes(), common).json()["scene_id"]
+    second = upload(client, "two.tif", tiff_bytes(), common).json()["scene_id"]
+    monkeypatch.setattr(
+        services,
+        "route",
+        lambda **_: (_ for _ in ()).throw(AssertionError("model must not run")),
+    )
+
+    response = client.post(
+        "/api/analyze",
+        json={
+            "scene_id": first,
+            "scene_id_2": second,
+            "question": "Compare optical and SAR.",
+            "capability": "optical_sar",
+        },
+    )
+
+    assert response.status_code == 422
+    compatibility = response.json()["detail"]
+    assert compatibility["eligible"] is False
+    assert compatibility["requested_workflow"] == "optical_sar"
+    assert "modalities_incompatible" in compatibility["reason_codes"]
+    assert trace_store.records() == []
+
+
+def test_compatible_pair_executes_joint_optical_sar_provider(
+    client: TestClient,
+) -> None:
+    optical = upload(
+        client,
+        "optical.tif",
+        tiff_bytes(bands=5, dtype="float32"),
+        {
+            "modality": "multispectral",
+            "sensor": "test-optical",
+            "acquisition_timestamp": "2026-01-01T00:00:00Z",
+            "pair_group": "pair-1",
+        },
+    ).json()["scene_id"]
+    sar = upload(
+        client,
+        "sar.tif",
+        tiff_bytes(bands=3, dtype="float32"),
+        {
+            "modality": "sar",
+            "sensor": "test-sar",
+            "acquisition_timestamp": "2026-01-02T00:00:00Z",
+            "polarization": "VV,VH",
+            "pair_group": "pair-1",
+        },
+    ).json()["scene_id"]
+
+    response = client.post(
+        "/api/analyze",
+        json={
+            "scene_id": optical,
+            "scene_id_2": sar,
+            "question": "Compare optical and SAR.",
+            "capability": "optical_sar",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["execution_mode"] == "live"
+    assert payload["results_artifact"] is None
+    assert payload["model"] == {
+        "name": "optical-sar-deterministic",
+        "version": "sentinel2-indices__sentinel1-backscatter-v1",
+    }
+    assert [item["type"] for item in payload["evidence"]] == [
+        "optical_statistics", "sar_statistics", "joint_valid_coverage"
+    ]
+    assert payload["trace"]["input_summary"]["n_images"] == 2
+    assert payload["trace"]["params"]["input_modalities"] == ["optical", "sar"]
+    records = trace_store.records()
+    assert len(records) == 1
+    assert records[0]["model_name"] == "optical-sar-deterministic"
+    assert records[0]["input_summary"]["question"] == "Compare optical and SAR."
+    assert trace_store.verify_chain()[0] is True
+
+
+def test_compatible_bitemporal_pair_executes_change_provider(
+    client: TestClient,
+) -> None:
+    before = upload(
+        client,
+        "before.tif",
+        tiff_bytes(bands=3, dtype="float32"),
+        {
+            "modality": "optical",
+            "sensor": "test-rgb",
+            "acquisition_timestamp": "2026-01-01T00:00:00Z",
+            "pair_group": "change-pair-1",
+        },
+    ).json()["scene_id"]
+    after = upload(
+        client,
+        "after.tif",
+        tiff_bytes(bands=3, dtype="float32"),
+        {
+            "modality": "optical",
+            "sensor": "test-rgb",
+            "acquisition_timestamp": "2026-01-02T00:00:00Z",
+            "pair_group": "change-pair-1",
+        },
+    ).json()["scene_id"]
+
+    response = client.post(
+        "/api/analyze",
+        json={
+            "scene_id": before,
+            "scene_id_2": after,
+            "question": "Did built-up area increase?",
+            "capability": "change_vqa",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["model"] == {
+        "name": "change-deterministic",
+        "version": "bitemporal-difference-v1",
+    }
+    assert "confidence" not in payload
+    assert "does not infer semantic change classes" in payload["answer"]
+    assert [item["type"] for item in payload["evidence"]] == [
+        "temporal_inputs", "change_statistics", "temporal_valid_coverage"
+    ]
+    assert payload["trace"]["input_summary"]["n_images"] == 2
+    assert payload["trace"]["params"]["temporal_order"] == ["t1", "t2"]
+    assert payload["trace"]["params"]["acquisition_times"] == [
+        "2026-01-01T00:00:00+00:00", "2026-01-02T00:00:00+00:00"
+    ]
+    assert trace_store.records()[0]["model_name"] == "change-deterministic"
+    assert trace_store.verify_chain()[0] is True
 
 
 def test_scene_id_is_not_derived_from_malicious_filename(client: TestClient) -> None:
@@ -312,6 +780,26 @@ def test_unsafe_scene_ids_return_404(client: TestClient, scene_id: str) -> None:
     assert "/etc/passwd" not in response.text
 
 
+def test_missing_scene_returns_404_before_provider_readiness(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        QwenVLModel,
+        "readiness",
+        lambda _: ModelReadiness(False, "CUDA_UNAVAILABLE", "private runtime detail"),
+    )
+
+    response = client.post(
+        "/api/analyze",
+        json={"scene_id": "scene_missing", "question": "What is visible?"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Local scene pixels are unavailable."}
+    assert "private runtime detail" not in response.text
+    assert trace_store.records() == []
+
+
 def test_uploaded_scene_is_resolved_for_live_analysis(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -336,7 +824,17 @@ def test_uploaded_scene_is_resolved_for_live_analysis(
     )
 
     assert response.status_code == 200
-    assert response.json()["answer"] == "uploaded scene analyzed"
+    payload = response.json()
+    assert set(payload) == {
+        "answer",
+        "execution_mode",
+        "results_artifact",
+        "model",
+        "trace",
+        "notice",
+    }
+    assert payload["answer"] == "uploaded scene analyzed"
+    assert payload["notice"] == "Live Qwen2.5-VL-3B inference completed."
     assert routed["image_paths"] == [
         str(services.INGESTED_SCENE_DIR / f"{created['scene_id']}.png")
     ]
@@ -389,6 +887,22 @@ def test_failed_storage_leaves_no_scene(
     assert response.json() == {"detail": "The uploaded image could not be stored."}
     assert "private storage failure" not in response.text
     assert list(services.INGESTED_SCENE_DIR.iterdir()) == []
+    assert list(services.SCENE_MANIFEST_DIR.iterdir()) == []
+
+
+def test_failed_tiff_manifest_leaves_no_native_or_preview(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_manifest(_: object) -> None:
+        raise ValueError("invalid manifest")
+
+    monkeypatch.setattr(services, "validate_scene_manifest", fail_manifest)
+    response = upload(client, "scene.tif", tiff_bytes())
+
+    assert response.status_code == 500
+    assert list(services.INGESTED_SCENE_DIR.iterdir()) == []
+    assert list(services.INGESTED_RASTER_DIR.iterdir()) == []
+    assert list(services.SCENE_MANIFEST_DIR.iterdir()) == []
 
 
 def test_valid_model_output_returns_answer_and_one_trace(
@@ -613,6 +1127,7 @@ def test_invalid_cached_answer_fails_before_trace(
             "scene_id": services.GOLDEN_SCENE_ID,
             "question": services.GOLDEN_QUESTION,
             "sensor": "LoveDA",
+            "execution_mode": "cached_result",
         },
     )
 
@@ -703,8 +1218,12 @@ def test_provider_metadata_is_truthful() -> None:
     status = {entry["name"]: entry for entry in capabilities.capabilities_status()}
     assert status[capabilities.SINGLE_IMAGE_VQA] == {
         "name": "single_image_vqa",
+        "registered": True,
         "available": True,
+        "state": "AVAILABLE",
         "provider": "qwen2.5vl-3b",
+        "reason_code": None,
+        "detail": None,
     }
 
 
@@ -714,10 +1233,10 @@ def test_capabilities_endpoint_reports_truthful_availability(
     payload = client.get("/api/capabilities").json()
     assert payload == {
         "capabilities": [
-            {"name": "single_image_vqa", "available": True, "provider": "qwen2.5vl-3b"},
-            {"name": "grounding", "available": False, "provider": None},
-            {"name": "change_vqa", "available": False, "provider": None},
-            {"name": "optical_sar", "available": False, "provider": None},
+            {"name": "single_image_vqa", "registered": True, "available": True, "state": "AVAILABLE", "provider": "qwen2.5vl-3b", "reason_code": None, "detail": None},
+            {"name": "grounding", "registered": True, "available": True, "state": "AVAILABLE", "provider": "grounding-dino-swint", "reason_code": None, "detail": None},
+            {"name": "change_vqa", "registered": True, "available": True, "state": "AVAILABLE", "provider": "change-deterministic", "reason_code": None, "detail": None},
+            {"name": "optical_sar", "registered": True, "available": True, "state": "AVAILABLE", "provider": "optical-sar-deterministic", "reason_code": None, "detail": None},
         ]
     }
 
@@ -768,27 +1287,46 @@ def test_unknown_capability_is_rejected_without_execution(
     assert trace_store.records() == []
 
 
-def test_unavailable_grounding_never_routes_to_vqa(
+def test_grounding_analysis_returns_normalized_bounding_box_evidence(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def fail(**_: object) -> dict:
-        raise AssertionError("model must not run")
+    created = upload(client, "scene.png", image_bytes("PNG")).json()
+    evidence = [
+        {
+            "type": "bounding_box",
+            "label": "building",
+            "coordinates": [0.1, 0.2, 0.7, 0.8],
+            "coordinate_space": "normalized_xyxy",
+            "confidence": 0.91,
+            "source_scene_id": None,
+        }
+    ]
+    model = SimpleNamespace(
+        version="test-grounding",
+        infer=lambda **_: {"answer": "Found 1 match.", "evidence": evidence},
+    )
 
-    monkeypatch.setattr(services, "route", fail)
-    monkeypatch.setattr(services, "find_cached_result", None)
+    monkeypatch.setattr(model_router, "get", lambda _: model)
     response = client.post(
         "/api/analyze",
         json={
-            "scene_id": services.GOLDEN_SCENE_ID,
-            "question": services.GOLDEN_QUESTION,
+            "scene_id": created["scene_id"],
+            "question": "Locate the building.",
             "capability": "grounding",
         },
     )
-    assert response.status_code == 503
-    assert response.json() == {
-        "detail": "Required capability is not currently available."
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["answer"] == "Found 1 match."
+    assert payload["evidence"] == evidence
+    assert payload["model"] == {
+        "name": "grounding-dino-swint",
+        "version": "test-grounding",
     }
-    assert trace_store.records() == []
+    assert payload["trace"]["params"]["capability"] == "grounding"
+    assert payload["trace"]["input_summary"]["question"] == "Locate the building."
+    assert len(trace_store.records()) == 1
+    assert trace_store.verify_chain()[0] is True
 
 
 @pytest.mark.parametrize("capability", ["change_vqa", "optical_sar"])
@@ -817,7 +1355,7 @@ def test_golden_fallback_rejects_unsupported_capability(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def fail(**_: object) -> dict:
-        raise AssertionError("model must not run")
+        raise RuntimeError("Grounding DINO inference requires a CUDA GPU")
 
     monkeypatch.setattr(services, "route", fail)
     response = client.post(
@@ -829,29 +1367,27 @@ def test_golden_fallback_rejects_unsupported_capability(
         },
     )
     assert response.status_code == 503
-    assert response.json() == {
-        "detail": "Required capability is not currently available."
-    }
+    assert response.json() == {"detail": "Live model inference is unavailable."}
     assert "showing the exact committed result" not in response.text
     assert trace_store.records() == []
 
 
-def test_inferred_grounding_is_unavailable_without_execution(
+def test_inferred_grounding_reports_model_unavailable_truthfully(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
         services,
         "route",
-        lambda **_: (_ for _ in ()).throw(AssertionError("model must not run")),
+        lambda **_: (_ for _ in ()).throw(
+            RuntimeError("Grounding DINO inference requires a CUDA GPU")
+        ),
     )
     response = client.post(
         "/api/analyze",
         json={"scene_id": services.GOLDEN_SCENE_ID, "question": "Where is the building?"},
     )
     assert response.status_code == 503
-    assert response.json() == {
-        "detail": "Required capability is not currently available."
-    }
+    assert response.json() == {"detail": "Live model inference is unavailable."}
     assert trace_store.records() == []
 
 
@@ -1011,8 +1547,8 @@ def test_plan_endpoint_reports_unavailable_and_missing_inputs(
     )
     assert grounding.status_code == 200
     assert grounding.json()["selected_capability"] == "grounding"
-    assert grounding.json()["provider_available"] is False
-    assert grounding.json()["executable"] is False
+    assert grounding.json()["provider_available"] is True
+    assert grounding.json()["executable"] is True
     assert change.status_code == 200
     assert change.json()["selected_capability"] == "change_vqa"
     assert change.json()["missing_inputs"] == ["second_scene"]
@@ -1048,7 +1584,7 @@ def test_plan_endpoint_rejects_unknown_capability(client: TestClient) -> None:
     assert trace_store.records() == []
 
 
-def test_plan_endpoint_reports_unavailable_grounding_step(
+def test_plan_endpoint_reports_available_grounding_step(
     client: TestClient,
 ) -> None:
     response = client.post(
@@ -1064,12 +1600,12 @@ def test_plan_endpoint_reports_unavailable_grounding_step(
             "capability": "grounding",
             "depends_on": [],
             "required_inputs": ["single_scene"],
-            "provider_available": False,
-            "provider": None,
+            "provider_available": True,
+            "provider": "grounding-dino-swint",
         }
     ]
-    assert payload["unavailable_capabilities"] == ["grounding"]
-    assert payload["executable"] is False
+    assert payload["unavailable_capabilities"] == []
+    assert payload["executable"] is True
 
 
 def test_plan_endpoint_reports_two_step_chain_for_temporal_localization(
@@ -1092,19 +1628,19 @@ def test_plan_endpoint_reports_two_step_chain_for_temporal_localization(
             "capability": "change_vqa",
             "depends_on": [],
             "required_inputs": ["scene_pair"],
-            "provider_available": False,
-            "provider": None,
+            "provider_available": True,
+            "provider": "change-deterministic",
         },
         {
             "step_id": "step_2",
             "capability": "grounding",
             "depends_on": ["step_1"],
             "required_inputs": ["step_1.output"],
-            "provider_available": False,
-            "provider": None,
+            "provider_available": True,
+            "provider": "grounding-dino-swint",
         },
     ]
-    assert payload["unavailable_capabilities"] == ["change_vqa", "grounding"]
+    assert payload["unavailable_capabilities"] == []
     assert payload["executable"] is False
     assert trace_store.records() == []
 
@@ -1171,7 +1707,9 @@ def test_multi_step_plan_analyze_invokes_no_provider(
     monkeypatch.setattr(
         services,
         "route",
-        lambda **_: (_ for _ in ()).throw(AssertionError("model must not run")),
+        lambda **_: (_ for _ in ()).throw(
+            RuntimeError("Grounding DINO inference requires a CUDA GPU")
+        ),
     )
     response = client.post(
         "/api/analyze",
@@ -1194,7 +1732,9 @@ def test_multi_step_request_on_golden_scene_cannot_use_cache(
     monkeypatch.setattr(
         services,
         "route",
-        lambda **_: (_ for _ in ()).throw(AssertionError("model must not run")),
+        lambda **_: (_ for _ in ()).throw(
+            RuntimeError("Grounding DINO inference requires a CUDA GPU")
+        ),
     )
     response = client.post(
         "/api/analyze",

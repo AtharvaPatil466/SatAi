@@ -10,23 +10,32 @@ MAX_QUESTION_LENGTH = 2000
 class AnalyzeRequest(BaseModel):
     scene_id: str = Field(min_length=1)
     question: str = Field(min_length=1, max_length=MAX_QUESTION_LENGTH)
+    execution_mode: Literal["live", "cached_result"] = "live"
     sensor: str | None = None
     capability: str | None = Field(
         default=None,
         description="Optional explicit capability; omitted requests are planned deterministically.",
+    )
+    scene_id_2: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Optional second scene for pairwise capabilities such as change_vqa. "
+            "Omitting it keeps the single-scene planning behaviour unchanged."
+        ),
     )
 
 
 class SceneUploadResponse(BaseModel):
     scene_id: str
     filename: str
-    format: Literal["PNG", "JPEG"]
+    format: Literal["PNG", "JPEG", "TIFF"]
     width: int
     height: int
-    sensor: None = None
-    gsd: None = None
-    location: None = None
-    acquisition_date: None = None
+    sensor: str | None = None
+    gsd: str | None = None
+    location: str | None = None
+    acquisition_date: str | None = None
 
 
 class ModelInfo(BaseModel):
@@ -36,6 +45,7 @@ class ModelInfo(BaseModel):
 
 class AnalyzeResponse(BaseModel):
     answer: str
+    evidence: list[dict[str, Any]] | None = None
     execution_mode: Literal["live", "cached_result"]
     results_artifact: str | None = None
     model: ModelInfo
@@ -50,8 +60,12 @@ class TraceVerification(BaseModel):
 
 class CapabilityStatus(BaseModel):
     name: str
+    registered: bool
     available: bool
+    state: Literal["AVAILABLE", "UNAVAILABLE", "NOT_IMPLEMENTED"]
     provider: str | None
+    reason_code: str | None
+    detail: str | None
 
 
 class CapabilitiesResponse(BaseModel):
