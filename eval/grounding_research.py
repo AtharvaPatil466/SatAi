@@ -1,7 +1,7 @@
-"""Research-only CPU harness for zero-shot Grounding DINO on DIOR-RSVG.
+"""Research-only local (CPU or Apple MPS) harness for zero-shot Grounding DINO on DIOR-RSVG.
 
 NOT a production path: the provider stays CUDA-only. The official Swin-T
-checkpoint is loaded on CPU and injected into an unmodified
+checkpoint is loaded on CPU or Apple MPS and injected into an unmodified
 GroundingDINOModel, so the provider's evidence construction and the suite's
 scoring primitives run unchanged. A forward hook keeps the raw decoder
 outputs (900 query scores + boxes) of that same forward pass, so thresholds
@@ -94,16 +94,18 @@ def sha256(path: Path) -> str:
 # --------------------------------------------------------------------------- inference
 
 def _raw(outputs: dict) -> dict:
-    # Same tensor and op as groundingdino.util.inference.predict.
+    # Same tensors and ops, in the same order (.cpu() before sigmoid), as
+    # groundingdino.util.inference.predict, so replay is exact on any device.
     return {
-        "scores": outputs["pred_logits"][0].sigmoid().max(dim=1).values.clone(),
-        "boxes": outputs["pred_boxes"][0].clone(),
+        "scores": outputs["pred_logits"].cpu().sigmoid()[0].max(dim=1).values.clone(),
+        "boxes": outputs["pred_boxes"].cpu()[0].clone(),
     }
 
 
-def cpu_provider(
+def local_provider(
     checkpoint: Path,
     *,
+    device: str = "cpu",
     box_threshold: float = BASELINE_BOX_THRESHOLD,
     text_threshold: float = BASELINE_TEXT_THRESHOLD,
     sink: list | None = None,
@@ -111,13 +113,14 @@ def cpu_provider(
     from groundingdino.util.inference import load_image, load_model, predict
 
     provider = GroundingDINOModel(box_threshold=box_threshold, text_threshold=text_threshold)
-    model = load_model(str(provider._resolve_config()), str(checkpoint), device="cpu")
+    model = load_model(str(provider._resolve_config()), str(checkpoint), device=device)
     if sink is not None:
         model.register_forward_hook(lambda _module, _args, outputs: sink.append(_raw(outputs)))
     # ponytail: pre-seeding the lazy-load slots skips only _load()'s CUDA gate;
+    # the device override is the only change to the call into predict().
     # infer(), its evidence validation and box conversion are the production code.
     provider._model, provider._load_image = model, load_image
-    provider._predict_fn = lambda **kwargs: predict(**{**kwargs, "device": "cpu"})
+    provider._predict_fn = lambda **kwargs: predict(**{**kwargs, "device": device})
     return provider
 
 
@@ -395,7 +398,7 @@ def command_run(args: argparse.Namespace) -> None:
     started, clock, repository = _now(), time.perf_counter(), registry.repository_state()
     dataset_root, samples, split = select(args.data_root, args.selection, args.seed)
     sink: list = []
-    provider = cpu_provider(args.checkpoint, box_threshold=args.box_threshold, text_threshold=args.text_threshold, sink=sink)
+    provider = local_provider(args.checkpoint, device=args.device, box_threshold=args.box_threshold, text_threshold=args.text_threshold, sink=sink)
     if args.harness == "suite":
         # Exact canonical harness: evaluate() constructs GroundingDINOModel() itself.
         if args.selection != "tquick" or args.prompt != "expression":
@@ -427,7 +430,7 @@ def command_run(args: argparse.Namespace) -> None:
         "box_threshold": args.box_threshold,
         "text_threshold": args.text_threshold,
         "selection_rule": "top-1 highest-confidence returned box; no box = IoU 0",
-        "device": "cpu",
+        "device": args.device,
         "checkpoint": str(args.checkpoint),
         "checkpoint_sha256": sha256(args.checkpoint),
         "command": shlex.join(sys.argv),
@@ -541,6 +544,7 @@ def main() -> int:
     run.add_argument("--box-threshold", type=float, default=BASELINE_BOX_THRESHOLD)
     run.add_argument("--text-threshold", type=float, default=BASELINE_TEXT_THRESHOLD)
     run.add_argument("--seed", type=int, default=suite.DEFAULT_SEED)
+    run.add_argument("--device", choices=("cpu", "mps"), default="cpu")
     run.add_argument("--archive", type=Path, help="JPEGImages.zip to extract missing images from")
     run.add_argument("--ephemeral-images", action="store_true", help="delete images extracted for this run")
     run.set_defaults(func=command_run)
