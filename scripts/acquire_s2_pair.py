@@ -16,6 +16,7 @@ import argparse
 import hashlib
 import json
 import math
+import shutil
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -52,14 +53,21 @@ def fetch_item(collection: str, item_id: str) -> dict:
     return response.json()
 
 
-def even_window(window: Window, limit: int = MAX_WINDOW_PIXELS) -> Window:
-    """Snap to even offsets/sizes so the 20 m SCL grid nests exactly in the 10 m grid."""
+def even_window(window: Window, tile_shape: tuple[int, int], limit: int = MAX_WINDOW_PIXELS) -> Window:
+    """Snap to even offsets/sizes so the 20 m SCL grid nests exactly in the 10 m grid.
+
+    Fails closed when the AOI is not fully inside the tile: rasterio silently
+    clips such reads, and writing the clipped block into the full-size window
+    stretches it (the defect that invalidated water-puzhal-lake-2018-2019).
+    """
     col = 2 * math.floor(window.col_off / 2)
     row = 2 * math.floor(window.row_off / 2)
     width = 2 * math.ceil((window.col_off + window.width - col) / 2)
     height = 2 * math.ceil((window.row_off + window.height - row) / 2)
     if width > limit or height > limit:
         raise ValueError(f"AOI window {width}x{height} exceeds {limit}x{limit} pixels")
+    if col < 0 or row < 0 or col + width > tile_shape[1] or row + height > tile_shape[0]:
+        raise ValueError(f"AOI window {(col, row, width, height)} is not inside the {tile_shape} tile; choose a tile that contains the AOI")
     return Window(col, row, width, height)
 
 
@@ -86,8 +94,11 @@ def _bytes_touched(dataset, window: Window) -> int:
 
 def _read_asset(href: str, window: Window) -> dict:
     with rasterio.Env(**GDAL_ENV), rasterio.open(href) as dataset:
+        data = dataset.read(1, window=window)
+        if data.shape != (int(window.height), int(window.width)):
+            raise ValueError(f"{href}: read {data.shape} for window {window}; refusing a clipped read")
         return {
-            "data": dataset.read(1, window=window),
+            "data": data,
             "crs": dataset.crs,
             "transform": dataset.window_transform(window),
             "native_transform": dataset.transform,
@@ -99,7 +110,7 @@ def _grid_window(item: dict, aoi: list[float]) -> tuple[Window, rasterio.Affine,
     href = item["assets"]["red"]["href"]
     with rasterio.Env(**GDAL_ENV), rasterio.open(href) as dataset:
         bounds = transform_bounds("EPSG:4326", dataset.crs, *aoi, densify_pts=21)
-        window = even_window(from_bounds(*bounds, transform=dataset.transform))
+        window = even_window(from_bounds(*bounds, transform=dataset.transform), dataset.shape)
         return window, dataset.transform, dataset.crs.to_string()
 
 
@@ -165,8 +176,7 @@ def acquire_observation(item: dict, window: Window, output: Path, label: str) ->
         },
         "declared_scaling": scaling,
         "observed_red_dn_p01": float(np.percentile(red_dn, 1)) if red_dn.size else None,
-        "native_window": {"col_off": int(window.col_off), "row_off": int(window.row_off),
-                          "width": int(window.width), "height": int(window.height)},
+        "native_window": _window_record(window),
         "estimated_bytes_transferred": sum(read["bytes_touched"] for read in reads.values()),
         "aoi_scl_histogram": {int(k): int(v) for k, v in zip(classes, counts)},
         "aoi_nodata_fraction": float(1 - valid.mean()),
@@ -196,6 +206,42 @@ def _raster_record(path: Path) -> dict:
         }
 
 
+def _window_record(window: Window) -> dict:
+    return {"col_off": int(window.col_off), "row_off": int(window.row_off),
+            "width": int(window.width), "height": int(window.height)}
+
+
+def reuse_observation(item_id: str, window: Window, output: Path, label: str) -> dict | None:
+    """Copy an identical (item, native window) observation from another acquired pair instead of re-downloading.
+
+    The copy is accepted only if both files still match their recorded SHA-256.
+    """
+    for path in sorted(PROVENANCE_DIR.glob("*.provenance.json")):
+        provenance = json.loads(path.read_text())
+        for observation in provenance["observations"]:
+            if observation["stac_item_id"] != item_id or observation["native_window"] != _window_record(window):
+                continue
+            source = output.parent / provenance["pair_id"]
+            copies = {
+                source / observation["raster"]["path"]: (output / f"{label}.tif", observation["raster"]["sha256"]),
+                source / observation["scl_raster"]["path"]: (output / f"{label}_scl.tif", observation["scl_raster"]["sha256"]),
+            }
+            if not all(src.is_file() and sha256(src) == digest for src, (_, digest) in copies.items()):
+                continue
+            for src, (dst, _) in copies.items():
+                shutil.copyfile(src, dst)
+            return {
+                **observation,
+                "label": label,
+                "raster": {**observation["raster"], "path": f"{label}.tif"},
+                "scl_raster": {**observation["scl_raster"], "path": f"{label}_scl.tif"},
+                "estimated_bytes_transferred": 0,
+                "reused_from": {"pair_id": provenance["pair_id"], "label": observation["label"],
+                                "original_retrieval": provenance["retrieved_at"]},
+            }
+    return None
+
+
 def acquire_pair(spec: dict, output_root: Path) -> dict:
     collection = spec["collection"]
     items = [fetch_item(collection, spec[key]) for key in ("t1_item", "t2_item")]
@@ -211,8 +257,8 @@ def acquire_pair(spec: dict, output_root: Path) -> dict:
     output.mkdir(parents=True, exist_ok=True)
     retrieved = datetime.now(timezone.utc).isoformat()
     observations = [
-        acquire_observation(items[0], t1_window, output, "t1"),
-        acquire_observation(items[1], t2_window, output, "t2"),
+        reuse_observation(item["id"], window, output, label) or acquire_observation(item, window, output, label)
+        for item, window, label in ((items[0], t1_window, "t1"), (items[1], t2_window, "t2"))
     ]
     return {
         "schema": "satquery.change_pair_provenance.v1",
@@ -224,7 +270,8 @@ def acquire_pair(spec: dict, output_root: Path) -> dict:
         "same_native_grid": same_grid,
         "window_policy": (
             "T2 reuses T1's exact native pixel window" if same_grid and shift == [0, 0]
-            else f"independent/shifted window (same_grid={same_grid}, shift={shift}); expected gate rejection"
+            else f"per-tile windows computed independently from the AOI (same_grid={same_grid}, t2 shift={shift}); "
+                 "no resampling; the canonical pair gate decides compatibility"
         ),
         "observations": observations,
     }

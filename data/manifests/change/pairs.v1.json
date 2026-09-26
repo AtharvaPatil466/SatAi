@@ -21,6 +21,10 @@
     },
     {
       "pair_id": "water-puzhal-lake-2018-2019",
+      "invalidated": {
+        "date": "2026-09-26",
+        "reason": "Acquisition defect: the AOI extends ~2.4 km past the east edge of tile 44PLV (native window cols 10570-11224 of 10980). rasterio silently clipped the read to 410 columns and the writer stretched them across the declared 654-column window, so both rasters are geometrically wrong while their metadata claims the full AOI. Detected by a same-datatake cross-tile comparison (44PLV vs 44PMV correlated 0.11). Acquisition now fails closed on windows outside the tile and on clipped reads. Replaced by water-puzhal-lake-2018-2019-pmv; the committed provenance is kept unchanged as evidence."
+      },
       "category": "water_change_loss",
       "collection": "sentinel-2-c1-l2a",
       "aoi_lonlat": [80.13, 13.14, 80.19, 13.19],
@@ -32,6 +36,33 @@
       "reference_boxes_norm": [[0.42, 0.55, 1.0, 1.0]],
       "reference_note": "Open water visible in the T1 (5 Jun 2018) preview occupies the lower-right lobe of the AOI; T2 shows dry lakebed there.",
       "confounders": "T1 tile cloud cover 17%; tile 44PLV has ~17% swath-edge nodata. Exposed lake bed can be wet or vegetated."
+    },
+    {
+      "pair_id": "water-puzhal-lake-2018-2019-pmv",
+      "category": "water_change_loss",
+      "collection": "sentinel-2-c1-l2a",
+      "aoi_lonlat": [80.13, 13.14, 80.19, 13.19],
+      "t1_item": "S2A_T44PMV_20180605T050536_L2A",
+      "t2_item": "S2B_T44PMV_20190615T050930_L2A",
+      "expected_outcome": "real_surface_change",
+      "event": "Replacement for the invalidated 44PLV pair, same AOI and dates, on tile 44PMV which fully contains the AOI. Chennai 2019 water crisis: Puzhal reservoir near-empty by June 2019 ('Day Zero' declared 19 Jun 2019); NASA Earth Observatory published Landsat 8 images for 31 May 2018 (near full) and 19 Jun 2019 (near empty).",
+      "selection_note": "Declared rule applied within the original 15 May - 30 Jun 2018 window restricted to tiles containing the AOI: 44PMV 2018-06-05 has the lowest tile cloud cover (38.65%). T1 is the same datatake as the invalidated pair's T1.",
+      "reference_sources": ["https://earthobservatory.nasa.gov/images/145242/water-shortages-in-india", "https://en.wikipedia.org/wiki/2019_Chennai_water_crisis"],
+      "reference_boxes_norm": [[0.62, 0.0, 1.0, 0.72], [0.3, 0.55, 0.9, 0.95]],
+      "reference_note": "Open water in the T1 (5 Jun 2018) preview: right side of the AOI plus the lower-left lobe; T2 (15 Jun 2019) shows exposed lakebed with residual shallow water on the far right. Drawn on the --rgb-only preview before the change provider was run.",
+      "confounders": "T1 tile cloud cover 38.65% (AOI-level cloud from SCL); different platforms (S2A/S2B); 10-day day-of-year difference."
+    },
+    {
+      "pair_id": "control-puzhal-same-datatake-cross-tile-2019",
+      "category": "control_same_datatake_cross_tile",
+      "collection": "sentinel-2-c1-l2a",
+      "aoi_lonlat": [80.10025, 13.14188, 80.14654, 13.18725],
+      "t1_item": "S2B_T44PMV_20190615T050930_L2A",
+      "t2_item": "S2B_T44PLV_20190615T050930_L2A",
+      "expected_outcome": "no_surface_change",
+      "event": "One Sentinel-2B datatake (15 Jun 2019, relative orbit 119) delivered as two overlapping L2A tile products. The AOI lies inside the 44PLV/44PMV overlap (UTM44 x 399960-409800), so both products cover it natively on the same 10 m lattice. The tiles' per-granule sensing times differ by ~3 s, so 44PMV is T1. Any detection is processing-induced (per-tile L2A atmospheric correction / scene classification), not surface change.",
+      "reference_sources": [],
+      "confounders": "None expected; this is a processing-floor control."
     },
     {
       "pair_id": "water-puzhal-lake-2019-2021",
