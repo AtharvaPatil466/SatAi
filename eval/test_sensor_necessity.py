@@ -37,6 +37,14 @@ def test_cloud_blinds_optical_but_not_sar_or_cloud_gated_fusion():
     assert result["obstructed_fraction_of_valid"] == 0.5
 
 
+def test_excluded_column_band_leaves_every_stratum():
+    result = evaluate_arrays(*_case(), frozen_rule(), exclude_columns=(0, SIZE // 2))
+
+    for stratum in result["strata"].values():
+        assert stratum["sar_only"]["reference_water_pixels"] == 0
+        assert stratum["sar_only"]["evaluable"] is False
+
+
 def test_reference_erosion_removes_boundary_and_transitional_pixels():
     occurrence = np.zeros((20, 20), dtype=np.uint8)
     occurrence[:, :10] = 100

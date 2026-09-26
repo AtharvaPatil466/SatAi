@@ -86,9 +86,13 @@ def score(predicted: np.ndarray, water: np.ndarray, land: np.ndarray, stratum: n
     }
 
 
-def evaluate_arrays(optical, sar, scl, occurrence, rule: dict) -> dict:
+def evaluate_arrays(optical, sar, scl, occurrence, rule: dict, exclude_columns: tuple[int, int] | None = None) -> dict:
+    """`exclude_columns` drops a [start, end) column band from every stratum (post-hoc sensitivity only)."""
     water, land = reference_masks(occurrence)
     methods, valid, obstructed = predictions(optical, sar, scl, rule)
+    if exclude_columns:
+        valid = valid.copy()
+        valid[:, exclude_columns[0]:exclude_columns[1]] = False
     strata = {"all": valid, "optically_clear": valid & ~obstructed, "optically_obstructed": valid & obstructed}
     return {
         "obstructed_fraction_of_valid": float(np.count_nonzero(obstructed & valid) / max(1, np.count_nonzero(valid))),
@@ -137,6 +141,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("case", type=Path, help="directory written by scripts/acquire_pc_s1s2_case.py")
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--exclude-cols", type=int, nargs=2, metavar=("START", "END"),
+                        help="post-hoc sensitivity: drop a column band whose reference is shown to be invalid")
     args = parser.parse_args()
     provenance = json.loads((args.case / "provenance.json").read_text())
     rule = frozen_rule()
@@ -151,12 +157,15 @@ def main() -> None:
             "min_stratum_pixels_per_class": MIN_STRATUM_PIXELS,
         },
         "input_sha256": {name: meta["sha256"] for name, meta in provenance["files"].items()},
+        "post_hoc_excluded_columns": args.exclude_cols,
         **evaluate_arrays(
             _read(args.case / "s2.tif"), _read(args.case / "s1.tif"),
             _read(args.case / "scl.tif")[0], _read(args.case / "gsw_occurrence.tif")[0], rule,
+            tuple(args.exclude_cols) if args.exclude_cols else None,
         ),
-        **_pair_validation_and_provider(args.case, provenance),
     }
+    if not args.exclude_cols:
+        result.update(_pair_validation_and_provider(args.case, provenance))
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps({s: {m: v["balanced_accuracy"] for m, v in r.items()} for s, r in result["strata"].items()}, indent=2))
