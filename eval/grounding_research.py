@@ -245,6 +245,52 @@ def parity(rows: list[dict], raws: list[dict], box_threshold: float) -> dict:
     return {"n": len(rows), "mismatches": len(mismatches), "mismatched_indices": mismatches}
 
 
+def rows_from_suite_report(report: dict) -> list[dict]:
+    """Convert a canonical suite report (e.g. the original T4 run) to harness rows."""
+    return [
+        {
+            "test_index": r["test_index"], "image_id": r["image_id"], "category": r["category"],
+            "expression": r["referring_expression"], "query": r["referring_expression"],
+            "image_size": [r["image_size"]["width"], r["image_size"]["height"]],
+            "gold": r["ground_truth"]["coordinates"], "evidence": r["prediction"]["evidence"],
+            "selected": r["selected_prediction"], "n_detections": len(r["prediction"]["evidence"]),
+            "iou": r["iou"],
+        }
+        for r in report["results"]
+    ]
+
+
+def compare_rows(reference: list[dict], candidate: list[dict]) -> dict:
+    """Per-example agreement between two runs over the same expressions."""
+    pairs = list(zip(reference, candidate, strict=True))
+    if any(a["test_index"] != b["test_index"] for a, b in pairs):
+        raise ValueError("runs are not aligned on test_index")
+    hit = lambda row: row["iou"] >= 0.5  # noqa: E731
+    confidence = lambda row: row["selected"]["confidence"] if row["selected"] else None  # noqa: E731
+    iou_deltas = [abs(a["iou"] - b["iou"]) for a, b in pairs]
+    confidence_deltas = [
+        abs(confidence(a) - confidence(b))
+        for a, b in pairs
+        if confidence(a) is not None and confidence(b) is not None
+    ]
+    return {
+        "n": len(pairs),
+        "hits_reference": sum(map(hit, reference)),
+        "hits_candidate": sum(map(hit, candidate)),
+        "hit_flips": [b["test_index"] for a, b in pairs if hit(a) != hit(b)],
+        "detection_presence_flips": [
+            b["test_index"] for a, b in pairs if (a["selected"] is None) != (b["selected"] is None)
+        ],
+        "n_detections_differ": sum(a["n_detections"] != b["n_detections"] for a, b in pairs),
+        "bit_identical_selected": sum(a["selected"] == b["selected"] for a, b in pairs),
+        "max_abs_iou_delta": max(iou_deltas),
+        "mean_abs_iou_delta": mean(iou_deltas),
+        "max_abs_confidence_delta": max(confidence_deltas, default=0.0),
+        "mean_iou_reference": mean(row["iou"] for row in reference),
+        "mean_iou_candidate": mean(row["iou"] for row in candidate),
+    }
+
+
 # --------------------------------------------------------------------------- failure analysis
 
 def image_objects(dataset_root: Path, image_id: str) -> list[dict]:
@@ -408,17 +454,7 @@ def command_run(args: argparse.Namespace) -> None:
             report = suite.evaluate(args.data_root, seed=args.seed)
         finally:
             suite.GroundingDINOModel = original
-        rows = [
-            {
-                "test_index": r["test_index"], "image_id": r["image_id"], "category": r["category"],
-                "expression": r["referring_expression"], "query": r["referring_expression"],
-                "image_size": [r["image_size"]["width"], r["image_size"]["height"]],
-                "gold": r["ground_truth"]["coordinates"], "evidence": r["prediction"]["evidence"],
-                "selected": r["selected_prediction"], "n_detections": len(r["prediction"]["evidence"]),
-                "iou": r["iou"],
-            }
-            for r in report["results"]
-        ]
+        rows = rows_from_suite_report(report)
     else:
         rows = run_samples(provider, samples, args.prompt, dataset_root, sink, archive=args.archive, ephemeral=args.ephemeral_images)
     summary = {
@@ -444,6 +480,22 @@ def command_run(args: argparse.Namespace) -> None:
     }
     _save_run(args.out_dir, summary, rows, sink)
     print(json.dumps(summary["metrics"], indent=2))
+
+
+def _rows(path: Path) -> list[dict]:
+    if path.is_dir():
+        return json.loads((path / "rows.json").read_text(encoding="utf-8"))
+    return rows_from_suite_report(json.loads(path.read_text(encoding="utf-8")))
+
+
+def command_compare(args: argparse.Namespace) -> None:
+    result = {
+        "reference": str(args.reference),
+        "candidate": str(args.candidate),
+        **compare_rows(_rows(args.reference), _rows(args.candidate)),
+    }
+    args.out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(result, indent=2))
 
 
 def command_sweep(args: argparse.Namespace) -> None:
@@ -552,6 +604,12 @@ def main() -> int:
     sweep_parser = commands.add_parser("sweep")
     sweep_parser.add_argument("--run-dir", type=Path, required=True)
     sweep_parser.set_defaults(func=command_sweep)
+
+    compare = commands.add_parser("compare")
+    compare.add_argument("--reference", type=Path, required=True, help="run dir or suite report JSON")
+    compare.add_argument("--candidate", type=Path, required=True, help="run dir or suite report JSON")
+    compare.add_argument("--out", type=Path, required=True)
+    compare.set_defaults(func=command_compare)
 
     analyze_parser = commands.add_parser("analyze")
     analyze_parser.add_argument("--run-dir", type=Path, required=True)

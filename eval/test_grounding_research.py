@@ -3,7 +3,14 @@ from pathlib import Path
 import pytest
 import torch
 
-from eval.grounding_research import classify_failure, head_phrase, replay, summarize, wilson
+from eval.grounding_research import (
+    classify_failure,
+    compare_rows,
+    head_phrase,
+    replay,
+    summarize,
+    wilson,
+)
 from eval.suites.grounding_dior_rsvg import _top_prediction
 from models.grounding_dino import GroundingDINOModel
 
@@ -86,3 +93,24 @@ def test_classify_failure_types():
     assert classify_failure(row([0.8, 0.0, 1.0, 0.2], 0.0), objects) == "other_class_object"
     assert classify_failure(row([0.0, 0.0, 0.4, 0.4], 0.25), objects) == "poor_localization_of_target"
     assert classify_failure(row([0.3, 0.8, 0.4, 0.9], 0.0), objects) == "background_or_unannotated"
+
+
+def test_compare_rows_reports_hit_flips_and_deltas():
+    box = {"coordinates": [0, 0, 1, 1], "confidence": 0.5}
+    reference = [
+        {"test_index": 1, "iou": 0.6, "selected": box, "n_detections": 1},
+        {"test_index": 2, "iou": 0.0, "selected": None, "n_detections": 0},
+    ]
+    candidate = [
+        {"test_index": 1, "iou": 0.4, "selected": {**box, "confidence": 0.4}, "n_detections": 1},
+        {"test_index": 2, "iou": 0.0, "selected": None, "n_detections": 0},
+    ]
+
+    result = compare_rows(reference, candidate)
+
+    assert result["hit_flips"] == [1]
+    assert result["bit_identical_selected"] == 1
+    assert result["max_abs_iou_delta"] == pytest.approx(0.2)
+    assert result["max_abs_confidence_delta"] == pytest.approx(0.1)
+    with pytest.raises(ValueError):
+        compare_rows(reference, candidate[::-1])
