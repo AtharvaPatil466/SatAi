@@ -20,6 +20,7 @@ from collections import Counter
 from pathlib import Path
 
 from eval.eval import DEGENERATE_NO_RATE, DEGENERATE_YES_RATE, answer_matches
+from training.remote_sensing import sha256_file
 
 FILE_SPLITS = {"train": "train", "validation": "val", "test": "test"}
 PATCH_METRES = 256 * 10  # 256 px Sentinel-2 RGB patches at 10 m
@@ -457,10 +458,6 @@ def rescore_prior(root: Path, prior: Path) -> dict:
         "metrics": METRICS,
         "summary": summarise(scored, counts),
     }
-
-
-def sha256_file(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def main(argv: list[str] | None = None) -> int:
