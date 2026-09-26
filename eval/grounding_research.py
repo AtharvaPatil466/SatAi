@@ -392,7 +392,7 @@ def _now() -> str:
 
 
 def command_run(args: argparse.Namespace) -> None:
-    started, clock = _now(), time.perf_counter()
+    started, clock, repository = _now(), time.perf_counter(), registry.repository_state()
     dataset_root, samples, split = select(args.data_root, args.selection, args.seed)
     sink: list = []
     provider = cpu_provider(args.checkpoint, box_threshold=args.box_threshold, text_threshold=args.text_threshold, sink=sink)
@@ -437,6 +437,7 @@ def command_run(args: argparse.Namespace) -> None:
         "metrics": summarize(rows),
         "per_category": _group(rows, lambda row: row["category"]),
         "environment": registry.environment(PACKAGES),
+        "repository": repository,
     }
     _save_run(args.out_dir, summary, rows, sink)
     print(json.dumps(summary["metrics"], indent=2))
@@ -521,6 +522,7 @@ def command_register(args: argparse.Namespace) -> None:
         "status": args.status,
         "notes": args.notes,
         "environment": summary.get("environment") or registry.environment(PACKAGES),
+        "repository": summary.get("repository"),  # None -> captured at registration
     }
     print(registry.write_record(record))
 
