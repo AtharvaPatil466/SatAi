@@ -571,7 +571,7 @@ def command_register(args: argparse.Namespace) -> None:
         },
         "command": summary.get("command", args.command),
         "started_at": summary.get("started_at", args.started_at),
-        "ended_at": summary.get("ended_at", _now()),
+        "ended_at": summary.get("ended_at", args.ended_at or _now()),
         "metrics": {**({"summary": summary["metrics"]} if "metrics" in summary else {}), **extra},
         "artifact_paths": [str(path) for path in args.artifact],
         "status": args.status,
@@ -640,6 +640,7 @@ def main() -> int:
     register.add_argument("--seed", type=int)
     register.add_argument("--command")
     register.add_argument("--started-at")
+    register.add_argument("--ended-at")
     register.add_argument("--repository-json", help='e.g. {"sha": "...", "dirty": false}')
     register.set_defaults(func=command_register)
 
