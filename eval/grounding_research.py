@@ -577,7 +577,9 @@ def command_register(args: argparse.Namespace) -> None:
         "status": args.status,
         "notes": args.notes,
         "environment": summary.get("environment") or registry.environment(PACKAGES),
-        "repository": summary.get("repository"),  # None -> captured at registration
+        # Explicit override for runs that predate per-run SHA capture; None ->
+        # captured at registration.
+        "repository": json.loads(args.repository_json) if args.repository_json else summary.get("repository"),
     }
     print(registry.write_record(record))
 
@@ -638,6 +640,7 @@ def main() -> int:
     register.add_argument("--seed", type=int)
     register.add_argument("--command")
     register.add_argument("--started-at")
+    register.add_argument("--repository-json", help='e.g. {"sha": "...", "dirty": false}')
     register.set_defaults(func=command_register)
 
     args = parser.parse_args()
